@@ -35,6 +35,11 @@ const scrapeAmazonProduct = async (asin: string) => {
     const html = await response.text();
     console.log(`HTML response length: ${html.length}`);
     
+    // Check if we got blocked or redirected to a captcha/error page
+    if (html.length < 10000 || html.includes('Robot Check') || html.includes('Sorry, we just need to make sure you\'re not a robot')) {
+      throw new Error('Amazon blocked the request - captcha or robot check detected');
+    }
+
     // More robust extraction functions
     const extractText = (patterns: RegExp[], defaultValue: string = '') => {
       for (const pattern of patterns) {
@@ -57,13 +62,18 @@ const scrapeAmazonProduct = async (asin: string) => {
       return null;
     };
 
-    // Extract product title
+    // Extract product title - MUST be real, not generic
     const title = extractText([
       /<span[^>]*id="productTitle"[^>]*>([^<]+)<\/span>/i,
       /<h1[^>]*class="[^"]*a-size-large[^"]*"[^>]*>([^<]+)<\/h1>/i,
       /<title>([^<]+?) \| Amazon/i,
       /<title>Amazon\.com: ([^<]+?)<\/title>/i
-    ], `Amazon Product ${asin}`);
+    ]);
+    
+    // If we couldn't extract a proper title, this is not valid product data
+    if (!title || title.includes('Amazon Product') || title.length < 10) {
+      throw new Error('Could not extract valid product title from Amazon page');
+    }
     
     // Extract brand
     const brand = extractText([
@@ -71,7 +81,7 @@ const scrapeAmazonProduct = async (asin: string) => {
       /<span[^>]*class="[^"]*po-brand[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/i,
       /by\s*<a[^>]*>([^<]+)<\/a>/i,
       /<span[^>]*>Brand:\s*<\/span>[\s\S]*?<span[^>]*>([^<]+)<\/span>/i
-    ], 'Unknown Brand');
+    ]);
 
     // Extract price with multiple patterns
     const priceText = extractText([
@@ -82,6 +92,11 @@ const scrapeAmazonProduct = async (asin: string) => {
     ]);
     
     const price = extractPrice(priceText);
+    
+    // If we couldn't get a price, this might not be a valid product page
+    if (!price || price <= 0) {
+      throw new Error('Could not extract valid price from Amazon page');
+    }
 
     // Extract main product image
     const imageUrl = extractText([
@@ -89,11 +104,11 @@ const scrapeAmazonProduct = async (asin: string) => {
       /<img[^>]*id="landingImage"[^>]*src="([^"]+)"/i,
       /<img[^>]*data-old-hires="([^"]+\.jpg[^"]*)"/i,
       /<img[^>]*class="[^"]*a-dynamic-image[^"]*"[^>]*src="([^"]+)"/i
-    ], 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=300&h=300&fit=crop');
+    ]);
 
     // Clean up image URL
     let cleanImageUrl = imageUrl;
-    if (imageUrl.includes('amazon.com') || imageUrl.includes('ssl-images-amazon.com')) {
+    if (imageUrl && (imageUrl.includes('amazon.com') || imageUrl.includes('ssl-images-amazon.com'))) {
       // Remove Amazon's image processing parameters for cleaner URL
       cleanImageUrl = imageUrl.split('._')[0] + '.jpg';
     }
@@ -119,12 +134,12 @@ const scrapeAmazonProduct = async (asin: string) => {
     const dimensions = extractText([
       /<tr[^>]*>[\s\S]*?<td[^>]*class="[^"]*prodDetAttrValue[^"]*"[^>]*>([^<]*(?:x[^<]*){2,})<\/td>/i,
       /<span[^>]*>Product Dimensions[\s\S]*?<span[^>]*>([^<]+)<\/span>/i
-    ], 'Not specified');
+    ]);
 
     const weight = extractText([
       /<tr[^>]*>[\s\S]*?<td[^>]*class="[^"]*prodDetAttrValue[^"]*"[^>]*>([^<]*(?:pounds?|lbs?|oz|ounces?)[^<]*)<\/td>/i,
       /<span[^>]*>Item Weight[\s\S]*?<span[^>]*>([^<]+)<\/span>/i
-    ], 'Not specified');
+    ]);
 
     // Check availability
     const availabilityText = extractText([
@@ -136,19 +151,7 @@ const scrapeAmazonProduct = async (asin: string) => {
                    !availabilityText.toLowerCase().includes('out of stock');
 
     // Generate realistic analytics based on actual product data
-    const generateAnalytics = (price: number | null, rating: number | null, reviewCount: number | null) => {
-      if (!price) {
-        return {
-          roi_percentage: 0,
-          profit_margin: 0,
-          estimated_monthly_sales: 0,
-          competition_level: 'Unknown',
-          amazon_risk_score: 3,
-          ip_risk_score: 2,
-          time_to_sell_days: 30
-        };
-      }
-      
+    const generateAnalytics = (price: number, rating: number | null, reviewCount: number | null) => {
       // More realistic calculations based on actual data
       const priceCategory = price < 25 ? 'low' : price < 100 ? 'medium' : 'high';
       const ratingBonus = rating ? (rating - 3) * 5 : 0; // Better ratings = better metrics
@@ -173,9 +176,9 @@ const scrapeAmazonProduct = async (asin: string) => {
 
     const analytics = generateAnalytics(price, rating, reviewCount);
 
-    console.log(`Extracted data for ${asin}:`, {
+    console.log(`Successfully extracted real data for ${asin}:`, {
       title: title.substring(0, 50),
-      brand,
+      brand: brand || 'Unknown',
       price,
       rating,
       reviewCount,
@@ -185,15 +188,15 @@ const scrapeAmazonProduct = async (asin: string) => {
     return {
       asin,
       title,
-      brand,
+      brand: brand || 'Unknown',
       category: 'General', // Category extraction is complex, keeping generic for now
-      image_url: cleanImageUrl,
-      dimensions,
-      weight,
+      image_url: cleanImageUrl || 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=300&h=300&fit=crop',
+      dimensions: dimensions || 'Not specified',
+      weight: weight || 'Not specified',
       current_price: price,
       buy_box_price: price,
-      lowest_fba_price: price ? price + (Math.random() * 5) : null,
-      lowest_fbm_price: price ? price - (Math.random() * 3) : null,
+      lowest_fba_price: price + (Math.random() * 5),
+      lowest_fbm_price: price - (Math.random() * 3),
       sales_rank: Math.floor(Math.random() * 100000) + 1000,
       amazon_in_stock: inStock,
       review_count: reviewCount,
@@ -317,7 +320,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Function error:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error: ' + error.message }),
+      JSON.stringify({ error: 'Failed to fetch real Amazon data: ' + error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

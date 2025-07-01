@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -42,117 +41,37 @@ export const useAmazonProduct = () => {
     setProduct(null);
     
     try {
-      // If not forcing fresh data, check if we have the product in our database
-      let shouldFetchFromAmazon = forceFresh;
-      let existingProduct = null;
+      // Always fetch fresh data - no more mock data allowed
+      console.log('Fetching fresh data from Amazon for identifier:', identifier);
+      
+      // Fetch from Amazon
+      const { data, error } = await supabase.functions.invoke('fetch-amazon-product', {
+        body: identifier.length === 10 ? { asin: identifier } : { upc: identifier }
+      });
 
-      if (!forceFresh) {
-        console.log('Checking database for existing product...');
-        const { data: dbProduct, error: dbError } = await supabase
-          .from('products')
-          .select(`
-            *,
-            product_analytics(*),
-            price_history(*)
-          `)
-          .or(`asin.eq.${identifier},upc.eq.${identifier}`)
-          .order('timestamp', { foreignTable: 'price_history', ascending: false })
-          .limit(1, { foreignTable: 'price_history' })
-          .single();
+      console.log('Edge function response:', { data, error });
 
-        if (dbProduct && !dbError) {
-          console.log('Found existing product in database:', dbProduct);
-          existingProduct = dbProduct;
-          
-          // Get the latest price data
-          const latestPrice = dbProduct.price_history?.[0];
-          
-          // More specific mock data detection - only consider it mock if title contains "Amazon Product" AND brand is "Unknown Brand"
-          const isMockData = (dbProduct.title?.includes('Amazon Product') && dbProduct.brand === 'Unknown Brand') ||
-                           (!latestPrice?.buy_box_price && !latestPrice?.rating && !latestPrice?.review_count);
-          
-          if (isMockData) {
-            console.log('Detected mock data in database, forcing fresh fetch');
-            shouldFetchFromAmazon = true;
-          } else {
-            console.log('Found real product data in database, using cached version');
-          }
-        } else {
-          console.log('No existing product found in database, will fetch fresh');
-          shouldFetchFromAmazon = true;
-        }
+      if (error) {
+        console.error('Edge function error:', error);
+        throw error;
       }
 
-      if (shouldFetchFromAmazon || !existingProduct) {
-        console.log('Fetching fresh data from Amazon for identifier:', identifier);
-        
-        // Fetch from Amazon
-        const { data, error } = await supabase.functions.invoke('fetch-amazon-product', {
-          body: identifier.length === 10 ? { asin: identifier } : { upc: identifier }
-        });
-
-        console.log('Edge function response:', { data, error });
-
-        if (error) {
-          console.error('Edge function error:', error);
-          throw error;
-        }
-
-        if (data?.success && data?.product) {
-          console.log('Successfully fetched fresh product data from Amazon:', data.product);
-          setProduct(data.product);
-          toast({
-            title: "Product Found",
-            description: `Successfully loaded fresh data for ${data.product.title}`,
-          });
-        } else {
-          console.error('No product data returned from edge function:', data);
-          throw new Error(data?.error || 'No product data returned');
-        }
-      } else {
-        console.log('Using existing product data from database:', existingProduct);
-        // Product exists and is not mock data, use cached data
-        const latestPrice = existingProduct.price_history?.[0];
-        const analytics = existingProduct.product_analytics?.[0];
-        
-        const productData = {
-          asin: existingProduct.asin,
-          upc: existingProduct.upc,
-          title: existingProduct.title,
-          brand: existingProduct.brand,
-          category: existingProduct.category,
-          image_url: existingProduct.image_url,
-          dimensions: existingProduct.dimensions,
-          weight: existingProduct.weight,
-          buy_box_price: latestPrice?.buy_box_price,
-          lowest_fba_price: latestPrice?.lowest_fba_price,
-          lowest_fbm_price: latestPrice?.lowest_fbm_price,
-          sales_rank: latestPrice?.sales_rank,
-          amazon_in_stock: latestPrice?.amazon_in_stock,
-          review_count: latestPrice?.review_count,
-          rating: latestPrice?.rating,
-          roi_percentage: analytics?.roi_percentage,
-          profit_margin: analytics?.profit_margin,
-          estimated_monthly_sales: analytics?.estimated_monthly_sales,
-          competition_level: analytics?.competition_level,
-          amazon_risk_score: analytics?.amazon_risk_score,
-          ip_risk_score: analytics?.ip_risk_score,
-          time_to_sell_days: analytics?.time_to_sell_days
-        };
-        
-        console.log('Setting product data from database:', productData);
-        setProduct(productData);
-        
+      if (data?.success && data?.product) {
+        console.log('Successfully fetched fresh product data from Amazon:', data.product);
+        setProduct(data.product);
         toast({
-          title: "Product Loaded",
-          description: `Found cached data for ${productData.title}`,
+          title: "Product Found",
+          description: `Successfully loaded fresh data for ${data.product.title}`,
         });
+      } else {
+        console.error('No product data returned from edge function:', data);
+        throw new Error(data?.error || 'Failed to fetch real Amazon data');
       }
     } catch (error) {
       console.error('Error fetching product:', error);
       toast({
         title: "Error",
-        description: `Failed to fetch product data: ${error.message}`,
+        description: `Failed to fetch real Amazon data: ${error.message}`,
         variant: "destructive",
       });
       setProduct(null);
