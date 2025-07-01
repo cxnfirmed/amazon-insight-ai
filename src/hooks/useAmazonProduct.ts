@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -26,6 +27,8 @@ export interface AmazonProduct {
   amazon_risk_score?: number;
   ip_risk_score?: number;
   time_to_sell_days?: number;
+  buybox_seller?: string;
+  buybox_seller_type?: 'Amazon' | 'FBA' | 'FBM';
 }
 
 export const useAmazonProduct = () => {

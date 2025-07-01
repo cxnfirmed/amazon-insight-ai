@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -98,6 +97,24 @@ const scrapeAmazonProduct = async (asin: string) => {
       throw new Error('Could not extract valid price from Amazon page');
     }
 
+    // Extract buybox seller information
+    const buyboxSeller = extractText([
+      /<span[^>]*id="sellerProfileTriggerId"[^>]*>([^<]+)<\/span>/i,
+      /<div[^>]*id="merchant-info"[\s\S]*?<span[^>]*>([^<]+)<\/span>/i,
+      /<span[^>]*>Ships from and sold by\s*<[^>]*>([^<]+)<\/[^>]*>/i,
+      /<span[^>]*>Sold by\s*<[^>]*>([^<]+)<\/[^>]*>/i,
+      /<span[^>]*>Ships from and sold by\s*([^<]+)<\/span>/i,
+      /<span[^>]*>Sold by\s*([^<]+)<\/span>/i
+    ], 'Unknown');
+
+    // Determine seller type
+    let buyboxSellerType: 'Amazon' | 'FBA' | 'FBM' = 'FBM';
+    if (buyboxSeller.toLowerCase().includes('amazon')) {
+      buyboxSellerType = 'Amazon';
+    } else if (html.includes('Fulfilled by Amazon') || html.includes('Ships from Amazon')) {
+      buyboxSellerType = 'FBA';
+    }
+
     // Extract main product image
     const imageUrl = extractText([
       /<img[^>]*id="landingImage"[^>]*data-old-hires="([^"]+)"/i,
@@ -182,7 +199,9 @@ const scrapeAmazonProduct = async (asin: string) => {
       price,
       rating,
       reviewCount,
-      inStock
+      inStock,
+      buyboxSeller,
+      buyboxSellerType
     });
 
     return {
@@ -201,6 +220,8 @@ const scrapeAmazonProduct = async (asin: string) => {
       amazon_in_stock: inStock,
       review_count: reviewCount,
       rating,
+      buybox_seller: buyboxSeller,
+      buybox_seller_type: buyboxSellerType,
       ...analytics
     };
 

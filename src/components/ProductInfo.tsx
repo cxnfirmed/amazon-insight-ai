@@ -2,7 +2,7 @@
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Star, Package, Truck } from 'lucide-react';
+import { Star, Package, Truck, User, Store } from 'lucide-react';
 import { AmazonProduct } from '@/hooks/useAmazonProduct';
 
 interface ProductInfoProps {
@@ -10,6 +10,43 @@ interface ProductInfoProps {
 }
 
 export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
+  const getBuyboxSellerBadge = () => {
+    if (!product.buybox_seller) return null;
+    
+    const getSellerIcon = () => {
+      switch (product.buybox_seller_type) {
+        case 'Amazon':
+          return <Store className="w-3 h-3" />;
+        case 'FBA':
+          return <Truck className="w-3 h-3" />;
+        case 'FBM':
+          return <User className="w-3 h-3" />;
+        default:
+          return <User className="w-3 h-3" />;
+      }
+    };
+
+    const getSellerColor = () => {
+      switch (product.buybox_seller_type) {
+        case 'Amazon':
+          return 'bg-orange-100 text-orange-800 border-orange-200';
+        case 'FBA':
+          return 'bg-blue-100 text-blue-800 border-blue-200';
+        case 'FBM':
+          return 'bg-gray-100 text-gray-800 border-gray-200';
+        default:
+          return 'bg-gray-100 text-gray-800 border-gray-200';
+      }
+    };
+
+    return (
+      <Badge className={`flex items-center gap-1 ${getSellerColor()}`}>
+        {getSellerIcon()}
+        {product.buybox_seller} ({product.buybox_seller_type})
+      </Badge>
+    );
+  };
+
   return (
     <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-slate-200 dark:border-slate-700">
       <CardContent className="p-6">
@@ -45,10 +82,7 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                     <Package className="w-3 h-3" />
                     {product.amazon_in_stock ? 'In Stock' : 'Out of Stock'}
                   </Badge>
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    <Truck className="w-3 h-3" />
-                    FBA Eligible
-                  </Badge>
+                  {getBuyboxSellerBadge()}
                   {product.brand && <Badge variant="outline">{product.brand}</Badge>}
                 </div>
                 
@@ -67,6 +101,11 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                 <div className="text-sm text-slate-600 dark:text-slate-400">
                   Current Buy Box Price
                 </div>
+                {product.buybox_seller && (
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Sold by {product.buybox_seller}
+                  </div>
+                )}
               </div>
             </div>
           </div>
