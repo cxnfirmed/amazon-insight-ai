@@ -9,9 +9,10 @@ import { RecentActivity } from '@/components/RecentActivity';
 
 interface DashboardProps {
   onProductSelect: (productId: string) => void;
+  searchQuery?: string;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect, searchQuery }) => {
   const recentProducts = [
     {
       id: 'B08N5WRWNW',
@@ -42,13 +43,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
     }
   ];
 
+  // Filter products based on search query
+  const filteredProducts = searchQuery 
+    ? recentProducts.filter(product => 
+        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.id.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : recentProducts;
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Dashboard</h1>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
+            {searchQuery ? `Search Results for "${searchQuery}"` : 'Dashboard'}
+          </h1>
           <p className="text-slate-600 dark:text-slate-400 mt-1">
-            Your Amazon selling performance overview
+            {searchQuery ? `Found ${filteredProducts.length} products` : 'Your Amazon selling performance overview'}
           </p>
         </div>
         
@@ -58,7 +69,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
         </Button>
       </div>
 
-      <QuickStats />
+      {!searchQuery && <QuickStats />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
@@ -66,19 +77,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Package className="w-5 h-5 text-blue-500" />
-                Recent Products
+                {searchQuery ? 'Search Results' : 'Recent Products'}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {recentProducts.map((product) => (
-                  <ProductCard 
-                    key={product.id} 
-                    product={product} 
-                    onClick={() => onProductSelect(product.id)}
-                  />
-                ))}
-              </div>
+              {filteredProducts.length > 0 ? (
+                <div className="space-y-4">
+                  {filteredProducts.map((product) => (
+                    <ProductCard 
+                      key={product.id} 
+                      product={product} 
+                      onClick={() => onProductSelect(product.id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-slate-600 dark:text-slate-400">
+                  No products found matching "{searchQuery}"
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

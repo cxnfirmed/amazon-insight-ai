@@ -17,21 +17,27 @@ import { cn } from '@/lib/utils';
 interface SidebarProps {
   open: boolean;
   setOpen: (open: boolean) => void;
+  activeView: string;
+  setActiveView: (view: string) => void;
 }
 
 const menuItems = [
-  { icon: BarChart, label: 'Dashboard', active: true },
-  { icon: TrendingUp, label: 'Product Analysis', active: false },
-  { icon: Calculator, label: 'FBA Calculator', active: false },
-  { icon: Brain, label: 'AI Insights', active: false },
-  { icon: Package, label: 'Inventory Tracker', active: false },
-  { icon: Bell, label: 'Alerts', active: false, badge: '3' },
-  { icon: Zap, label: 'Automation', active: false },
-  { icon: FileText, label: 'Reports', active: false },
-  { icon: Settings, label: 'Settings', active: false },
+  { icon: BarChart, label: 'Dashboard', view: 'Dashboard' },
+  { icon: TrendingUp, label: 'Product Analysis', view: 'Product Analysis' },
+  { icon: Calculator, label: 'FBA Calculator', view: 'FBA Calculator' },
+  { icon: Brain, label: 'AI Insights', view: 'AI Insights' },
+  { icon: Package, label: 'Inventory Tracker', view: 'Inventory Tracker' },
+  { icon: Bell, label: 'Alerts', view: 'Alerts', badge: '3' },
+  { icon: Zap, label: 'Automation', view: 'Automation' },
+  { icon: FileText, label: 'Reports', view: 'Reports' },
+  { icon: Settings, label: 'Settings', view: 'Settings' },
 ];
 
-export const Sidebar: React.FC<SidebarProps> = ({ open }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ open, activeView, setActiveView }) => {
+  const handleMenuClick = (view: string) => {
+    setActiveView(view);
+  };
+
   return (
     <div className={cn(
       "fixed left-0 top-16 h-[calc(100vh-4rem)] bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border-r border-slate-200 dark:border-slate-700 transition-all duration-300 z-40",
@@ -42,12 +48,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ open }) => {
           {menuItems.map((item) => (
             <Button
               key={item.label}
-              variant={item.active ? "default" : "ghost"}
+              variant={activeView === item.view ? "default" : "ghost"}
               className={cn(
                 "w-full justify-start relative",
                 !open && "px-2",
-                item.active && "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg"
+                activeView === item.view && "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg"
               )}
+              onClick={() => handleMenuClick(item.view)}
             >
               <item.icon className="w-5 h-5" />
               {open && (

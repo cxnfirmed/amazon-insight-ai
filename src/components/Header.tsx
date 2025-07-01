@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Search, Bell, Settings, User, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,9 +9,17 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 interface HeaderProps {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  onSearch: (query: string) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
+export const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onSearch }) => {
+  const [searchValue, setSearchValue] = useState('');
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSearch(searchValue);
+  };
+
   return (
     <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-50">
       <div className="flex items-center justify-between h-full px-6">
@@ -36,13 +44,15 @@ export const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) =
         </div>
 
         <div className="flex-1 max-w-md mx-8">
-          <div className="relative">
+          <form onSubmit={handleSearchSubmit} className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
             <Input 
               placeholder="Search ASIN, UPC, or product name..." 
               className="pl-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
             />
-          </div>
+          </form>
         </div>
 
         <div className="flex items-center gap-3">
