@@ -61,7 +61,7 @@ export const ProductAnalysis: React.FC<ProductAnalysisProps> = ({ product, onBac
         <div className="lg:col-span-2">
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              <PriceHistoryChart productId={product.asin} />
+              <PriceHistoryChart product={product} />
               <AIDecisionScore productId={product.asin} />
             </div>
           )}
