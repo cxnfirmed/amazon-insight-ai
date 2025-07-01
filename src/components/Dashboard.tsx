@@ -20,7 +20,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
       currentPrice: 49.99,
       roi: 32.5,
       salesRank: 15,
-      trend: 'up'
+      trend: 'up' as const
     },
     {
       id: 'B07HGJKJPX',
@@ -29,7 +29,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
       currentPrice: 79.99,
       roi: 28.3,
       salesRank: 8,
-      trend: 'up'
+      trend: 'up' as const
     },
     {
       id: 'B09JQMJSXY',
@@ -38,7 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onProductSelect }) => {
       currentPrice: 249.99,
       roi: -2.1,
       salesRank: 3,
-      trend: 'down'
+      trend: 'down' as const
     }
   ];
 
