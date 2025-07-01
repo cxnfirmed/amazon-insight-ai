@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { AmazonProductAnalytics } from '@/components/AmazonProductAnalytics';
 import { Dashboard } from '@/components/Dashboard';
@@ -27,8 +26,9 @@ const Index = () => {
       const isUPC = query.match(/^\d{12}$/);
       
       if (isASIN || isUPC) {
-        console.log('Valid ASIN/UPC detected, fetching product data...');
-        await fetchProduct(query);
+        console.log('Valid ASIN/UPC detected, fetching fresh product data...');
+        // Force fresh fetch when user searches
+        await fetchProduct(query, true);
         setActiveView('Product Analysis');
         setSelectedProduct(query);
       } else {
@@ -62,7 +62,7 @@ const Index = () => {
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-slate-600 dark:text-slate-400">Fetching Amazon product data...</p>
+            <p className="text-slate-600 dark:text-slate-400">Fetching fresh Amazon product data...</p>
           </div>
         </div>
       );

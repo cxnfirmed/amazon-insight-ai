@@ -34,30 +34,74 @@ export const useAmazonProduct = () => {
   const [product, setProduct] = useState<AmazonProduct | null>(null);
   const { toast } = useToast();
 
-  const fetchProduct = async (identifier: string) => {
+  const fetchProduct = async (identifier: string, forceFresh: boolean = false) => {
     if (!identifier) return;
 
-    console.log('Starting fetchProduct for identifier:', identifier);
+    console.log('Starting fetchProduct for identifier:', identifier, 'forceFresh:', forceFresh);
     setLoading(true);
     setProduct(null); // Clear any existing product data
     
     try {
-      // First check if we have the product in our database
-      const { data: existingProduct, error: dbError } = await supabase
-        .from('products')
-        .select(`
-          *,
-          product_analytics(*),
-          price_history(*)
-        `)
-        .or(`asin.eq.${identifier},upc.eq.${identifier}`)
-        .order('timestamp', { foreignTable: 'price_history', ascending: false })
-        .limit(1, { foreignTable: 'price_history' })
-        .single();
+      // If not forcing fresh data, check if we have the product in our database
+      let shouldFetchFromAmazon = forceFresh;
+      let existingProduct = null;
 
-      if (existingProduct && !dbError) {
-        console.log('Found existing product in database:', existingProduct);
-        // Product exists, use cached data
+      if (!forceFresh) {
+        const { data: dbProduct, error: dbError } = await supabase
+          .from('products')
+          .select(`
+            *,
+            product_analytics(*),
+            price_history(*)
+          `)
+          .or(`asin.eq.${identifier},upc.eq.${identifier}`)
+          .order('timestamp', { foreignTable: 'price_history', ascending: false })
+          .limit(1, { foreignTable: 'price_history' })
+          .single();
+
+        if (dbProduct && !dbError) {
+          existingProduct = dbProduct;
+          // Check if the data looks like mock data - if so, fetch fresh
+          const isMockData = dbProduct.title?.includes('Amazon Product') || 
+                           dbProduct.brand === 'Unknown Brand' ||
+                           !dbProduct.buy_box_price;
+          
+          if (isMockData) {
+            console.log('Detected mock data in database, forcing fresh fetch');
+            shouldFetchFromAmazon = true;
+          }
+        }
+      }
+
+      if (shouldFetchFromAmazon || !existingProduct) {
+        console.log('Fetching fresh data from Amazon for ASIN:', identifier);
+        
+        // Fetch from Amazon
+        const { data, error } = await supabase.functions.invoke('fetch-amazon-product', {
+          body: identifier.length === 10 ? { asin: identifier } : { upc: identifier }
+        });
+
+        console.log('Edge function response:', { data, error });
+
+        if (error) {
+          console.error('Edge function error:', error);
+          throw error;
+        }
+
+        if (data?.success && data?.product) {
+          console.log('Successfully fetched fresh product data from Amazon:', data.product);
+          setProduct(data.product);
+          toast({
+            title: "Product Found",
+            description: `Successfully loaded fresh data for ${data.product.title}`,
+          });
+        } else {
+          console.error('No product data returned from edge function:', data);
+          throw new Error(data?.error || 'No product data returned');
+        }
+      } else {
+        console.log('Using existing product data from database:', existingProduct);
+        // Product exists and is not mock data, use cached data
         const latestPrice = existingProduct.price_history?.[0];
         const analytics = existingProduct.product_analytics?.[0];
         
@@ -93,31 +137,6 @@ export const useAmazonProduct = () => {
           title: "Product Loaded",
           description: `Found cached data for ${productData.title}`,
         });
-      } else {
-        console.log('Product not in database, fetching from Amazon...');
-        // Product doesn't exist, fetch from Amazon
-        const { data, error } = await supabase.functions.invoke('fetch-amazon-product', {
-          body: identifier.length === 10 ? { asin: identifier } : { upc: identifier }
-        });
-
-        console.log('Edge function response:', { data, error });
-
-        if (error) {
-          console.error('Edge function error:', error);
-          throw error;
-        }
-
-        if (data?.success && data?.product) {
-          console.log('Successfully fetched product from Amazon:', data.product);
-          setProduct(data.product);
-          toast({
-            title: "Product Found",
-            description: `Successfully loaded ${data.product.title}`,
-          });
-        } else {
-          console.error('No product data returned from edge function:', data);
-          throw new Error(data?.error || 'No product data returned');
-        }
       }
     } catch (error) {
       console.error('Error fetching product:', error);
