@@ -9,7 +9,142 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      price_history: {
+        Row: {
+          amazon_in_stock: boolean | null
+          asin: string
+          buy_box_price: number | null
+          id: string
+          lowest_fba_price: number | null
+          lowest_fbm_price: number | null
+          rating: number | null
+          review_count: number | null
+          sales_rank: number | null
+          timestamp: string
+        }
+        Insert: {
+          amazon_in_stock?: boolean | null
+          asin: string
+          buy_box_price?: number | null
+          id?: string
+          lowest_fba_price?: number | null
+          lowest_fbm_price?: number | null
+          rating?: number | null
+          review_count?: number | null
+          sales_rank?: number | null
+          timestamp?: string
+        }
+        Update: {
+          amazon_in_stock?: boolean | null
+          asin?: string
+          buy_box_price?: number | null
+          id?: string
+          lowest_fba_price?: number | null
+          lowest_fbm_price?: number | null
+          rating?: number | null
+          review_count?: number | null
+          sales_rank?: number | null
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_history_asin_fkey"
+            columns: ["asin"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["asin"]
+          },
+        ]
+      }
+      product_analytics: {
+        Row: {
+          amazon_risk_score: number | null
+          asin: string
+          competition_level: string | null
+          estimated_monthly_sales: number | null
+          id: string
+          ip_risk_score: number | null
+          profit_margin: number | null
+          roi_percentage: number | null
+          time_to_sell_days: number | null
+          updated_at: string
+        }
+        Insert: {
+          amazon_risk_score?: number | null
+          asin: string
+          competition_level?: string | null
+          estimated_monthly_sales?: number | null
+          id?: string
+          ip_risk_score?: number | null
+          profit_margin?: number | null
+          roi_percentage?: number | null
+          time_to_sell_days?: number | null
+          updated_at?: string
+        }
+        Update: {
+          amazon_risk_score?: number | null
+          asin?: string
+          competition_level?: string | null
+          estimated_monthly_sales?: number | null
+          id?: string
+          ip_risk_score?: number | null
+          profit_margin?: number | null
+          roi_percentage?: number | null
+          time_to_sell_days?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_analytics_asin_fkey"
+            columns: ["asin"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["asin"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          asin: string
+          brand: string | null
+          category: string | null
+          created_at: string
+          dimensions: string | null
+          id: string
+          image_url: string | null
+          title: string
+          upc: string | null
+          updated_at: string
+          weight: string | null
+        }
+        Insert: {
+          asin: string
+          brand?: string | null
+          category?: string | null
+          created_at?: string
+          dimensions?: string | null
+          id?: string
+          image_url?: string | null
+          title: string
+          upc?: string | null
+          updated_at?: string
+          weight?: string | null
+        }
+        Update: {
+          asin?: string
+          brand?: string | null
+          category?: string | null
+          created_at?: string
+          dimensions?: string | null
+          id?: string
+          image_url?: string | null
+          title?: string
+          upc?: string | null
+          updated_at?: string
+          weight?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

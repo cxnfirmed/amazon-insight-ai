@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { ProductAnalysis } from '@/components/ProductAnalysis';
 import { Dashboard } from '@/components/Dashboard';
@@ -8,20 +9,27 @@ import { FBACalculator } from '@/components/FBACalculator';
 import { AIDecisionScore } from '@/components/AIDecisionScore';
 import { InventoryTracker } from '@/components/InventoryTracker';
 import { Alerts } from '@/components/Alerts';
+import { AmazonProductAnalytics } from '@/components/AmazonProductAnalytics';
+import { useAmazonProduct } from '@/hooks/useAmazonProduct';
 
 const Index = () => {
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState('Dashboard');
   const [searchQuery, setSearchQuery] = useState('');
+  const { product, fetchProduct, loading } = useAmazonProduct();
 
-  const handleSearch = (query: string) => {
+  const handleSearch = async (query: string) => {
     setSearchQuery(query);
     if (query.trim()) {
-      // If it looks like an ASIN, go to product analysis
-      if (query.match(/^[A-Z0-9]{10}$/)) {
-        setSelectedProduct(query);
+      // Check if it's an ASIN (10 alphanumeric characters) or UPC (12 digits)
+      const isASIN = query.match(/^[A-Z0-9]{10}$/);
+      const isUPC = query.match(/^\d{12}$/);
+      
+      if (isASIN || isUPC) {
+        await fetchProduct(query);
         setActiveView('Product Analysis');
+        setSelectedProduct(query);
       } else {
         // Otherwise show search results in dashboard
         setActiveView('Dashboard');
@@ -31,7 +39,33 @@ const Index = () => {
   };
 
   const renderActiveView = () => {
-    if (selectedProduct && activeView === 'Product Analysis') {
+    // Show Amazon product analytics if we have product data
+    if (product && activeView === 'Product Analysis') {
+      return (
+        <AmazonProductAnalytics 
+          product={product}
+          onBack={() => {
+            setSelectedProduct(null);
+            setActiveView('Dashboard');
+          }}
+        />
+      );
+    }
+
+    // Show loading state while fetching product data
+    if (loading && activeView === 'Product Analysis') {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-slate-600 dark:text-slate-400">Fetching product data...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Fallback to original product analysis for non-Amazon products
+    if (selectedProduct && activeView === 'Product Analysis' && !product) {
       return (
         <ProductAnalysis 
           productId={selectedProduct} 
