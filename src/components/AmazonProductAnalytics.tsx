@@ -221,14 +221,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
       </div>
 
       {/* Price History Chart */}
-      <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-        <CardHeader>
-          <CardTitle>Price History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <PriceHistoryChart productId={product.asin} />
-        </CardContent>
-      </Card>
+      <PriceHistoryChart product={product} />
     </div>
   );
 };
