@@ -64,16 +64,23 @@ const Index = () => {
       );
     }
 
-    // Fallback to original product analysis for non-Amazon products
+    // Fallback to updated product analysis for non-Amazon products that use real data
     if (selectedProduct && activeView === 'Product Analysis' && !product) {
       return (
-        <ProductAnalysis 
-          productId={selectedProduct} 
-          onBack={() => {
-            setSelectedProduct(null);
-            setActiveView('Dashboard');
-          }} 
-        />
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <p className="text-slate-600 dark:text-slate-400">No product data found for: {selectedProduct}</p>
+            <button 
+              onClick={() => {
+                setSelectedProduct(null);
+                setActiveView('Dashboard');
+              }}
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
       );
     }
 

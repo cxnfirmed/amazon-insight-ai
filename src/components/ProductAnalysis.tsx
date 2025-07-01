@@ -7,13 +7,14 @@ import { FBACalculator } from '@/components/FBACalculator';
 import { PriceHistoryChart } from '@/components/PriceHistoryChart';
 import { AIDecisionScore } from '@/components/AIDecisionScore';
 import { ProductInfo } from '@/components/ProductInfo';
+import { AmazonProduct } from '@/hooks/useAmazonProduct';
 
 interface ProductAnalysisProps {
-  productId: string;
+  product: AmazonProduct;
   onBack: () => void;
 }
 
-export const ProductAnalysis: React.FC<ProductAnalysisProps> = ({ productId, onBack }) => {
+export const ProductAnalysis: React.FC<ProductAnalysisProps> = ({ product, onBack }) => {
   const [activeTab, setActiveTab] = useState('overview');
 
   const tabs = [
@@ -31,11 +32,11 @@ export const ProductAnalysis: React.FC<ProductAnalysisProps> = ({ productId, onB
           Back to Dashboard
         </Button>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          Product Analysis - {productId}
+          Product Analysis - {product.asin}
         </h1>
       </div>
 
-      <ProductInfo productId={productId} />
+      <ProductInfo product={product} />
 
       <div className="border-b border-slate-200 dark:border-slate-700">
         <nav className="flex space-x-8">
@@ -60,17 +61,17 @@ export const ProductAnalysis: React.FC<ProductAnalysisProps> = ({ productId, onB
         <div className="lg:col-span-2">
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              <PriceHistoryChart productId={productId} />
-              <AIDecisionScore productId={productId} />
+              <PriceHistoryChart productId={product.asin} />
+              <AIDecisionScore productId={product.asin} />
             </div>
           )}
           
           {activeTab === 'calculator' && (
-            <FBACalculator productId={productId} />
+            <FBACalculator productId={product.asin} />
           )}
           
           {activeTab === 'ai-insights' && (
-            <AIDecisionScore productId={productId} detailed />
+            <AIDecisionScore productId={product.asin} detailed />
           )}
           
           {activeTab === 'alerts' && (
@@ -88,7 +89,7 @@ export const ProductAnalysis: React.FC<ProductAnalysisProps> = ({ productId, onB
         </div>
 
         <div className="space-y-6">
-          <AIDecisionScore productId={productId} compact />
+          <AIDecisionScore productId={product.asin} compact />
           <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
             <CardHeader>
               <CardTitle className="text-lg">Quick Actions</CardTitle>
