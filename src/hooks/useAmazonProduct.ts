@@ -67,14 +67,15 @@ export const useAmazonProduct = () => {
           // Get the latest price data
           const latestPrice = dbProduct.price_history?.[0];
           
-          // Check if the data looks like mock data - if so, fetch fresh
-          const isMockData = dbProduct.title?.includes('Amazon Product') || 
-                           dbProduct.brand === 'Unknown Brand' ||
-                           !latestPrice?.buy_box_price;
+          // More specific mock data detection - only consider it mock if title contains "Amazon Product" AND brand is "Unknown Brand"
+          const isMockData = (dbProduct.title?.includes('Amazon Product') && dbProduct.brand === 'Unknown Brand') ||
+                           (!latestPrice?.buy_box_price && !latestPrice?.rating && !latestPrice?.review_count);
           
           if (isMockData) {
             console.log('Detected mock data in database, forcing fresh fetch');
             shouldFetchFromAmazon = true;
+          } else {
+            console.log('Found real product data in database, using cached version');
           }
         } else {
           console.log('No existing product found in database, will fetch fresh');
