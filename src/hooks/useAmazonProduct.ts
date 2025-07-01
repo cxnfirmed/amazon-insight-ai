@@ -39,7 +39,7 @@ export const useAmazonProduct = () => {
 
     console.log('Starting fetchProduct for identifier:', identifier, 'forceFresh:', forceFresh);
     setLoading(true);
-    setProduct(null); // Clear any existing product data
+    setProduct(null);
     
     try {
       // If not forcing fresh data, check if we have the product in our database
@@ -47,6 +47,7 @@ export const useAmazonProduct = () => {
       let existingProduct = null;
 
       if (!forceFresh) {
+        console.log('Checking database for existing product...');
         const { data: dbProduct, error: dbError } = await supabase
           .from('products')
           .select(`
@@ -60,21 +61,29 @@ export const useAmazonProduct = () => {
           .single();
 
         if (dbProduct && !dbError) {
+          console.log('Found existing product in database:', dbProduct);
           existingProduct = dbProduct;
+          
+          // Get the latest price data
+          const latestPrice = dbProduct.price_history?.[0];
+          
           // Check if the data looks like mock data - if so, fetch fresh
           const isMockData = dbProduct.title?.includes('Amazon Product') || 
                            dbProduct.brand === 'Unknown Brand' ||
-                           !dbProduct.buy_box_price;
+                           !latestPrice?.buy_box_price;
           
           if (isMockData) {
             console.log('Detected mock data in database, forcing fresh fetch');
             shouldFetchFromAmazon = true;
           }
+        } else {
+          console.log('No existing product found in database, will fetch fresh');
+          shouldFetchFromAmazon = true;
         }
       }
 
       if (shouldFetchFromAmazon || !existingProduct) {
-        console.log('Fetching fresh data from Amazon for ASIN:', identifier);
+        console.log('Fetching fresh data from Amazon for identifier:', identifier);
         
         // Fetch from Amazon
         const { data, error } = await supabase.functions.invoke('fetch-amazon-product', {
