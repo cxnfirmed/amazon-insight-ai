@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { ProductAnalysis } from '@/components/ProductAnalysis';
+import { AmazonProductAnalytics } from '@/components/AmazonProductAnalytics';
 import { Dashboard } from '@/components/Dashboard';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
@@ -9,7 +9,6 @@ import { FBACalculator } from '@/components/FBACalculator';
 import { AIDecisionScore } from '@/components/AIDecisionScore';
 import { InventoryTracker } from '@/components/InventoryTracker';
 import { Alerts } from '@/components/Alerts';
-import { AmazonProductAnalytics } from '@/components/AmazonProductAnalytics';
 import { useAmazonProduct } from '@/hooks/useAmazonProduct';
 
 const Index = () => {
@@ -20,6 +19,7 @@ const Index = () => {
   const { product, fetchProduct, loading } = useAmazonProduct();
 
   const handleSearch = async (query: string) => {
+    console.log('Search initiated for:', query);
     setSearchQuery(query);
     if (query.trim()) {
       // Check if it's an ASIN (10 alphanumeric characters) or UPC (12 digits)
@@ -27,6 +27,7 @@ const Index = () => {
       const isUPC = query.match(/^\d{12}$/);
       
       if (isASIN || isUPC) {
+        console.log('Valid ASIN/UPC detected, fetching product data...');
         await fetchProduct(query);
         setActiveView('Product Analysis');
         setSelectedProduct(query);
@@ -39,8 +40,11 @@ const Index = () => {
   };
 
   const renderActiveView = () => {
+    console.log('Rendering active view:', activeView, 'Product:', product);
+    
     // Show Amazon product analytics if we have product data
     if (product && activeView === 'Product Analysis') {
+      console.log('Showing AmazonProductAnalytics with product:', product.title);
       return (
         <AmazonProductAnalytics 
           product={product}
@@ -58,24 +62,29 @@ const Index = () => {
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-slate-600 dark:text-slate-400">Fetching product data...</p>
+            <p className="text-slate-600 dark:text-slate-400">Fetching Amazon product data...</p>
           </div>
         </div>
       );
     }
 
-    // Fallback to updated product analysis for non-Amazon products that use real data
-    if (selectedProduct && activeView === 'Product Analysis' && !product) {
+    // Show error state if we tried to fetch a product but failed
+    if (selectedProduct && activeView === 'Product Analysis' && !product && !loading) {
       return (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <p className="text-slate-600 dark:text-slate-400">No product data found for: {selectedProduct}</p>
+            <p className="text-slate-600 dark:text-slate-400 mb-4">
+              Unable to fetch product data for ASIN: {selectedProduct}
+            </p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+              This could be due to Amazon blocking the request or the product not being available.
+            </p>
             <button 
               onClick={() => {
                 setSelectedProduct(null);
                 setActiveView('Dashboard');
               }}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Back to Dashboard
             </button>

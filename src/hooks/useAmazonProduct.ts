@@ -37,7 +37,9 @@ export const useAmazonProduct = () => {
   const fetchProduct = async (identifier: string) => {
     if (!identifier) return;
 
+    console.log('Starting fetchProduct for identifier:', identifier);
     setLoading(true);
+    setProduct(null); // Clear any existing product data
     
     try {
       // First check if we have the product in our database
@@ -54,11 +56,12 @@ export const useAmazonProduct = () => {
         .single();
 
       if (existingProduct && !dbError) {
+        console.log('Found existing product in database:', existingProduct);
         // Product exists, use cached data
         const latestPrice = existingProduct.price_history?.[0];
         const analytics = existingProduct.product_analytics?.[0];
         
-        setProduct({
+        const productData = {
           asin: existingProduct.asin,
           upc: existingProduct.upc,
           title: existingProduct.title,
@@ -81,30 +84,49 @@ export const useAmazonProduct = () => {
           amazon_risk_score: analytics?.amazon_risk_score,
           ip_risk_score: analytics?.ip_risk_score,
           time_to_sell_days: analytics?.time_to_sell_days
+        };
+        
+        console.log('Setting product data from database:', productData);
+        setProduct(productData);
+        
+        toast({
+          title: "Product Loaded",
+          description: `Found cached data for ${productData.title}`,
         });
       } else {
+        console.log('Product not in database, fetching from Amazon...');
         // Product doesn't exist, fetch from Amazon
         const { data, error } = await supabase.functions.invoke('fetch-amazon-product', {
           body: identifier.length === 10 ? { asin: identifier } : { upc: identifier }
         });
 
-        if (error) throw error;
+        console.log('Edge function response:', { data, error });
 
-        if (data.success) {
+        if (error) {
+          console.error('Edge function error:', error);
+          throw error;
+        }
+
+        if (data?.success && data?.product) {
+          console.log('Successfully fetched product from Amazon:', data.product);
           setProduct(data.product);
           toast({
             title: "Product Found",
             description: `Successfully loaded ${data.product.title}`,
           });
+        } else {
+          console.error('No product data returned from edge function:', data);
+          throw new Error(data?.error || 'No product data returned');
         }
       }
     } catch (error) {
       console.error('Error fetching product:', error);
       toast({
         title: "Error",
-        description: "Failed to fetch product data. Please try again.",
+        description: `Failed to fetch product data: ${error.message}`,
         variant: "destructive",
       });
+      setProduct(null);
     } finally {
       setLoading(false);
     }
