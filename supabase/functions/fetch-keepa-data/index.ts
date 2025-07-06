@@ -19,12 +19,9 @@ interface KeepaProduct {
   csv: number[][];
   offerCount: number;
   buyBoxPrice: number;
+  buyBoxPriceHistory: number[];
   fbaNewPrice: number;
   fbmNewPrice: number;
-  dropsPerMonth: number;
-  buyBoxPriceHistory: number[];
-  fbaPriceHistory: number[];
-  salesRankDrops: number[];
   offerCountHistory: number[];
   lastUpdate: number;
   stats?: {
@@ -32,6 +29,23 @@ interface KeepaProduct {
     sales90?: number;
     buyBoxShipped30?: number;
   };
+}
+
+// Helper function to convert Keepa timestamp to ISO
+function keepaTimeToISO(keepaTime: number): string {
+  return new Date((keepaTime + 21564000) * 60 * 1000).toISOString();
+}
+
+// Helper function to get last non-null value from array
+function getLastNonNullValue(arr: number[]): number | null {
+  if (!arr || arr.length === 0) return null;
+  
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i] !== null && arr[i] !== undefined && arr[i] > 0) {
+      return arr[i];
+    }
+  }
+  return null;
 }
 
 serve(async (req) => {
@@ -76,11 +90,50 @@ serve(async (req) => {
 
     const product: KeepaProduct = data.products[0];
     
+    // Extract basic product info
+    const title = product.title || 'Product title not available';
+    const manufacturer = product.manufacturer || null;
+    const category = product.categoryTree?.[0]?.name || 'Unknown';
+    
+    // Extract image URL
+    let imageUrl = null;
+    if (product.imagesCSV) {
+      const images = product.imagesCSV.split(',');
+      if (images.length > 0 && images[0].trim()) {
+        imageUrl = `https://images-na.ssl-images-amazon.com/images/I/${images[0].trim()}.jpg`;
+      }
+    }
+
+    // Extract pricing data - get last non-null values and convert from cents
+    const buyBoxPrice = getLastNonNullValue(product.buyBoxPriceHistory);
+    const buyBoxPriceUSD = buyBoxPrice ? buyBoxPrice / 100 : null;
+    
+    const lowestFBAPrice = getLastNonNullValue([product.fbaNewPrice]);
+    const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
+    
+    const lowestFBMPrice = getLastNonNullValue([product.fbmNewPrice]);
+    const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
+
+    // Extract offer data
+    const offerCount = getLastNonNullValue(product.offerCountHistory) || product.offerCount || 0;
+    const inStock = offerCount > 0 || buyBoxPriceUSD !== null;
+
+    // Extract sales rank
+    const salesRank = product.salesRanks ? Object.values(product.salesRanks)[0]?.[0] : null;
+
+    // Calculate estimated monthly sales using strict hierarchy
+    let estimatedMonthlySales = null;
+    if (product.stats?.sales30 && product.stats.sales30 > 0) {
+      estimatedMonthlySales = product.stats.sales30;
+    } else if (product.stats?.sales90 && product.stats.sales90 > 0) {
+      estimatedMonthlySales = Math.floor(product.stats.sales90 / 3);
+    } else if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
+      estimatedMonthlySales = product.stats.buyBoxShipped30;
+    }
+
     // Parse historical price data from CSV format
-    const parseHistoryData = () => {
-      if (!product.csv || product.csv.length === 0) return [];
-      
-      const priceHistory = [];
+    const priceHistory = [];
+    if (product.csv && product.csv.length > 0) {
       // Keepa CSV indices: [0] = Amazon, [1] = New, [18] = Buy Box, [3] = Sales Rank, [11] = Offer Count
       const timestamps = product.csv[0] || [];
       const buyBoxPrices = product.csv[18] || [];
@@ -91,116 +144,62 @@ serve(async (req) => {
 
       for (let i = 0; i < timestamps.length; i += 2) {
         if (timestamps[i] && timestamps[i + 1] !== undefined) {
-          // Convert Keepa timestamp to standard timestamp
-          const timestamp = new Date((timestamps[i] + 21564000) * 60000);
+          const timestamp = keepaTimeToISO(timestamps[i]);
           
-          priceHistory.push({
-            timestamp: timestamp.toISOString(),
+          const historyEntry = {
+            timestamp,
             buyBoxPrice: buyBoxPrices[i + 1] && buyBoxPrices[i + 1] > 0 ? buyBoxPrices[i + 1] / 100 : null,
             amazonPrice: amazonPrices[i + 1] && amazonPrices[i + 1] > 0 ? amazonPrices[i + 1] / 100 : null,
             newPrice: newPrices[i + 1] && newPrices[i + 1] > 0 ? newPrices[i + 1] / 100 : null,
             salesRank: salesRanks[i + 1] || null,
             offerCount: offerCounts[i + 1] || 0
-          });
+          };
+
+          // Only add entries that have at least some data
+          if (historyEntry.buyBoxPrice || historyEntry.amazonPrice || historyEntry.newPrice || historyEntry.salesRank) {
+            priceHistory.push(historyEntry);
+          }
         }
       }
-      
-      return priceHistory.slice(-180); // Last 180 days
-    };
-
-    // Parse product image from imagesCSV
-    const getImageUrl = () => {
-      if (!product.imagesCSV) return null;
-      const images = product.imagesCSV.split(',');
-      if (images.length === 0) return null;
-      const firstImage = images[0].trim();
-      return `https://images-na.ssl-images-amazon.com/images/I/${firstImage}.jpg`;
-    };
-
-    // Parse category from categoryTree
-    const getCategoryName = () => {
-      if (!product.categoryTree || product.categoryTree.length === 0) return null;
-      return product.categoryTree[0].name;
-    };
-
-    // Calculate monthly sales using strict hierarchy
-    const calculateMonthlySales = () => {
-      // Primary: Use stats.sales30 as the monthly sales count
-      if (product.stats?.sales30 && product.stats.sales30 > 0) {
-        return product.stats.sales30;
-      }
-      
-      // Fallback 1: If stats.sales30 is null → use stats.sales90 / 3
-      if (product.stats?.sales90 && product.stats.sales90 > 0) {
-        return Math.floor(product.stats.sales90 / 3);
-      }
-      
-      // Fallback 2: If both are null → use stats.buyBoxShipped30
-      if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
-        return product.stats.buyBoxShipped30;
-      }
-      
-      // If all are null → return null (will display as "N/A")
-      return null;
-    };
-
-    // Get current buy box price
-    const getCurrentBuyBoxPrice = () => {
-      if (product.buyBoxPrice && product.buyBoxPrice > 0) {
-        return product.buyBoxPrice / 100;
-      }
-      
-      // Try from history
-      if (product.buyBoxPriceHistory && product.buyBoxPriceHistory.length > 0) {
-        const latestPrice = product.buyBoxPriceHistory[product.buyBoxPriceHistory.length - 1];
-        return latestPrice && latestPrice > 0 ? latestPrice / 100 : null;
-      }
-      
-      return null;
-    };
-
-    // Determine stock status
-    const isInStock = () => {
-      const hasOffers = (product.offerCount || 0) > 0;
-      const hasBuyBox = getCurrentBuyBoxPrice() !== null;
-      return hasOffers || hasBuyBox;
-    };
+    }
 
     const result = {
       success: true,
       data: {
         asin: product.asin,
-        title: product.title || 'Product title not available',
-        manufacturer: product.manufacturer || null,
-        category: getCategoryName(),
-        imageUrl: getImageUrl(),
+        title,
+        manufacturer,
+        category,
+        imageUrl,
         
-        // Current pricing from Keepa
-        buyBoxPrice: getCurrentBuyBoxPrice(),
-        lowestFBAPrice: product.fbaNewPrice && product.fbaNewPrice > 0 ? product.fbaNewPrice / 100 : null,
-        lowestFBMPrice: product.fbmNewPrice && product.fbmNewPrice > 0 ? product.fbmNewPrice / 100 : null,
+        // Current pricing data
+        buyBoxPrice: buyBoxPriceUSD,
+        lowestFBAPrice: lowestFBAPriceUSD,
+        lowestFBMPrice: lowestFBMPriceUSD,
         
         // Sales and inventory data
-        offerCount: product.offerCount || 0,
-        estimatedMonthlySales: calculateMonthlySales(),
-        inStock: isInStock(),
+        offerCount,
+        estimatedMonthlySales,
+        inStock,
         
         // Sales rank data
-        salesRank: product.salesRanks ? Object.values(product.salesRanks)[0]?.[0] : null,
+        salesRank,
         
-        // Historical data
-        priceHistory: parseHistoryData(),
+        // Historical data - parsed and cleaned
+        priceHistory,
         
         // Metadata
         tokensUsed: data.tokensConsumed || 1,
         tokensLeft: data.tokensLeft || 0,
         processingTime: data.processingTimeInMs || 0,
-        lastUpdate: product.lastUpdate ? new Date((product.lastUpdate + 21564000) * 60000).toISOString() : null
+        lastUpdate: product.lastUpdate ? keepaTimeToISO(product.lastUpdate) : null
       }
     };
 
     console.log('Keepa data processed successfully:', {
       title: result.data.title,
+      buyBoxPrice: result.data.buyBoxPrice,
+      lowestFBAPrice: result.data.lowestFBAPrice,
       priceHistoryPoints: result.data.priceHistory.length,
       tokensLeft: result.data.tokensLeft,
       offerCount: result.data.offerCount,
