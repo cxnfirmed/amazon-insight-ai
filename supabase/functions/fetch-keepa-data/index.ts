@@ -60,7 +60,7 @@ function getLastNonNullValue(arr: number[]): number | null {
   return null;
 }
 
-// Helper function to get current price from offerCSV
+// Helper function to get current price from offerCSV - get the most recent valid price
 function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
   if (!offerCSV || offerCSV.length === 0) return null;
   
@@ -69,66 +69,60 @@ function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
   // Step backwards through the array in groups of 3 (timestamp, price, shipping)
   for (let i = offerCSV.length - 2; i >= 1; i -= 3) {
     if (offerCSV[i] && offerCSV[i] > 0) {
-      console.log('FBM Debug: Found price at index', i, ':', offerCSV[i]);
+      console.log('Price Debug: Found price at index', i, ':', offerCSV[i]);
       return offerCSV[i];
     }
   }
   
   // If no recent price found, try the first price entry
   if (offerCSV.length >= 2 && offerCSV[1] && offerCSV[1] > 0) {
-    console.log('FBM Debug: Using first price entry:', offerCSV[1]);
+    console.log('Price Debug: Using first price entry:', offerCSV[1]);
     return offerCSV[1];
   }
   
   return null;
 }
 
-// Helper function to get lowest FBM price using Keepa's NEW_FBM_SHIPPING logic
+// Helper function to get lowest FBA price from current offers
+function getLowestFBAPrice(offers: any[]): number | null {
+  if (!offers || offers.length === 0) {
+    console.log('FBA Debug: No offers array or empty offers');
+    return null;
+  }
+  
+  console.log('FBA Debug: Processing', offers.length, 'offers for FBA');
+  
+  // Find all FBA offers and get their current prices
+  const fbaOffers = offers.filter(offer => 
+    offer.isFBA === true && offer.offerCSV && offer.offerCSV.length > 0
+  ).map(offer => ({
+    ...offer,
+    currentPrice: getCurrentPriceFromOfferCSV(offer.offerCSV)
+  })).filter(offer => offer.currentPrice && offer.currentPrice > 0);
+  
+  console.log('FBA Debug: Found', fbaOffers.length, 'FBA offers with valid prices');
+  
+  if (fbaOffers.length === 0) {
+    return null;
+  }
+  
+  // Sort by price and get the lowest
+  fbaOffers.sort((a, b) => a.currentPrice - b.currentPrice);
+  const lowestPrice = fbaOffers[0].currentPrice / 100; // Convert from cents
+  console.log('FBA Debug: Lowest FBA price:', lowestPrice);
+  return lowestPrice;
+}
+
+// Helper function to get lowest FBM price from current offers
 function getLowestFBMPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) {
     console.log('FBM Debug: No offers array or empty offers');
     return null;
   }
   
-  console.log('FBM Debug: Processing', offers.length, 'offers');
+  console.log('FBM Debug: Processing', offers.length, 'offers for FBM');
   
-  // Log offer structure for debugging
-  if (offers.length > 0) {
-    console.log('FBM Debug: Sample offer structure:', {
-      keys: Object.keys(offers[0]),
-      firstOffer: offers[0]
-    });
-  }
-  
-  // First priority: Find the offer marked as lowest NEW FBM shipping by Keepa
-  const lowestFBMOffer = offers.find(offer => offer.isLowest_NEW_FBM_SHIPPING === true);
-  
-  console.log('FBM Debug: Found isLowest_NEW_FBM_SHIPPING offer:', !!lowestFBMOffer);
-  
-  if (lowestFBMOffer && lowestFBMOffer.offerCSV) {
-    const price = getCurrentPriceFromOfferCSV(lowestFBMOffer.offerCSV);
-    if (price && price > 0) {
-      console.log('FBM Debug: Using isLowest_NEW_FBM_SHIPPING price:', price / 100);
-      return price / 100;
-    }
-  }
-  
-  // Second priority: Find FBM offer marked as lowest offer by Keepa
-  const lowestFBMGeneralOffer = offers.find(offer => 
-    offer.isFBA === false && offer.isLowestOffer === true
-  );
-  
-  console.log('FBM Debug: Found FBM isLowestOffer:', !!lowestFBMGeneralOffer);
-  
-  if (lowestFBMGeneralOffer && lowestFBMGeneralOffer.offerCSV) {
-    const price = getCurrentPriceFromOfferCSV(lowestFBMGeneralOffer.offerCSV);
-    if (price && price > 0) {
-      console.log('FBM Debug: Using FBM isLowestOffer price:', price / 100);
-      return price / 100;
-    }
-  }
-  
-  // Fallback: Filter for any FBM offers and find the lowest price
+  // Find all FBM offers (non-FBA) and get their current prices
   const fbmOffers = offers.filter(offer => 
     offer.isFBA === false && offer.offerCSV && offer.offerCSV.length > 0
   ).map(offer => ({
@@ -139,19 +133,15 @@ function getLowestFBMPrice(offers: any[]): number | null {
   console.log('FBM Debug: Found', fbmOffers.length, 'FBM offers with valid prices');
   
   if (fbmOffers.length === 0) {
-    // Log all offers to see what we have
-    console.log('FBM Debug: All offers isFBA status:', offers.map(offer => ({
-      isFBA: offer.isFBA,
-      hasOfferCSV: !!offer.offerCSV,
-      condition: offer.condition
-    })));
+    console.log('FBM Debug: No valid FBM offers found');
     return null;
   }
   
   // Sort by price and get the lowest
   fbmOffers.sort((a, b) => a.currentPrice - b.currentPrice);
-  console.log('FBM Debug: Using fallback FBM price:', fbmOffers[0].currentPrice / 100);
-  return fbmOffers[0].currentPrice / 100;
+  const lowestPrice = fbmOffers[0].currentPrice / 100; // Convert from cents
+  console.log('FBM Debug: Lowest FBM price:', lowestPrice);
+  return lowestPrice;
 }
 
 serve(async (req) => {
@@ -215,20 +205,15 @@ serve(async (req) => {
     const buyBoxPrice = getLastNonNullValue(buyBoxHistory);
     const buyBoxPriceUSD = buyBoxPrice ? buyBoxPrice / 100 : null;
     
-    const fbaHistory = product.csv && product.csv[1] ? product.csv[1] : [];
-    const lowestFBAPrice = getLastNonNullValue(fbaHistory);
-    const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
-    
-    // Extract lowest FBM price using Keepa's NEW_FBM_SHIPPING logic with fallback
+    // Use the new functions to get accurate current FBA and FBM prices
+    const lowestFBAPriceUSD = getLowestFBAPrice(product.offers || []);
     const lowestFBMPriceUSD = getLowestFBMPrice(product.offers || []);
 
-    console.log('FBM Offers Debug:', {
-      totalOffers: product.offers?.length || 0,
-      lowestFBMOfferFound: product.offers?.some(offer => offer.isLowest_NEW_FBM_SHIPPING === true) || false,
-      fbmNewOffersCount: product.offers?.filter(offer => 
-        offer.isFBA === false && offer.condition === 1 && offer.price > 0
-      ).length || 0,
-      lowestFBMPriceUSD: lowestFBMPriceUSD
+    console.log('Pricing Debug:', {
+      buyBoxPriceUSD: buyBoxPriceUSD,
+      lowestFBAPriceUSD: lowestFBAPriceUSD,
+      lowestFBMPriceUSD: lowestFBMPriceUSD,
+      totalOffers: product.offers?.length || 0
     });
 
     // Extract offer count from history
