@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -88,13 +87,13 @@ export const BulkAnalysisTools: React.FC = () => {
       
       for (let i = 0; i < identifiers.length; i++) {
         const identifier = identifiers[i];
+        let currentAsin = identifier; // Declare currentAsin at the loop level
         setProgress((i / identifiers.length) * 100);
 
         try {
           console.log(`Processing ${i + 1}/${identifiers.length}: ${identifier}`);
 
           // Determine if it's ASIN or UPC/EAN
-          let currentAsin = identifier;
           const isASIN = /^[A-Z0-9]{10}$/.test(identifier);
           const isUPC = /^\d{12,14}$/.test(identifier);
 
