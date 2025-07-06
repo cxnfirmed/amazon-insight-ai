@@ -60,6 +60,20 @@ function getLastNonNullValue(arr: number[]): number | null {
   return null;
 }
 
+// Helper function to get current price from offerCSV
+function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
+  if (!offerCSV || offerCSV.length === 0) return null;
+  
+  // offerCSV contains [timestamp, price, shipping, timestamp, price, shipping, ...]
+  // We want the most recent price (last price entry)
+  for (let i = offerCSV.length - 2; i >= 0; i -= 3) {
+    if (offerCSV[i] && offerCSV[i] > 0) {
+      return offerCSV[i];
+    }
+  }
+  return null;
+}
+
 // Helper function to get lowest FBM price using Keepa's NEW_FBM_SHIPPING logic
 function getLowestFBMPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) {
@@ -82,44 +96,53 @@ function getLowestFBMPrice(offers: any[]): number | null {
   
   console.log('FBM Debug: Found isLowest_NEW_FBM_SHIPPING offer:', !!lowestFBMOffer);
   
-  if (lowestFBMOffer && lowestFBMOffer.price && lowestFBMOffer.price > 0) {
-    console.log('FBM Debug: Using isLowest_NEW_FBM_SHIPPING price:', lowestFBMOffer.price / 100);
-    return lowestFBMOffer.price / 100;
+  if (lowestFBMOffer && lowestFBMOffer.offerCSV) {
+    const price = getCurrentPriceFromOfferCSV(lowestFBMOffer.offerCSV);
+    if (price && price > 0) {
+      console.log('FBM Debug: Using isLowest_NEW_FBM_SHIPPING price:', price / 100);
+      return price / 100;
+    }
   }
   
   // Second priority: Find FBM offer marked as lowest offer by Keepa
   const lowestFBMGeneralOffer = offers.find(offer => 
-    offer.isFBA === false && offer.isLowestOffer === true && offer.price > 0
+    offer.isFBA === false && offer.isLowestOffer === true
   );
   
   console.log('FBM Debug: Found FBM isLowestOffer:', !!lowestFBMGeneralOffer);
   
-  if (lowestFBMGeneralOffer) {
-    console.log('FBM Debug: Using FBM isLowestOffer price:', lowestFBMGeneralOffer.price / 100);
-    return lowestFBMGeneralOffer.price / 100;
+  if (lowestFBMGeneralOffer && lowestFBMGeneralOffer.offerCSV) {
+    const price = getCurrentPriceFromOfferCSV(lowestFBMGeneralOffer.offerCSV);
+    if (price && price > 0) {
+      console.log('FBM Debug: Using FBM isLowestOffer price:', price / 100);
+      return price / 100;
+    }
   }
   
   // Fallback: Filter for any FBM offers and find the lowest price
   const fbmOffers = offers.filter(offer => 
-    offer.isFBA === false && offer.price > 0
-  );
+    offer.isFBA === false && offer.offerCSV && offer.offerCSV.length > 0
+  ).map(offer => ({
+    ...offer,
+    currentPrice: getCurrentPriceFromOfferCSV(offer.offerCSV)
+  })).filter(offer => offer.currentPrice && offer.currentPrice > 0);
   
-  console.log('FBM Debug: Found', fbmOffers.length, 'FBM offers with price > 0');
+  console.log('FBM Debug: Found', fbmOffers.length, 'FBM offers with valid prices');
   
   if (fbmOffers.length === 0) {
     // Log all offers to see what we have
     console.log('FBM Debug: All offers isFBA status:', offers.map(offer => ({
       isFBA: offer.isFBA,
-      price: offer.price,
+      hasOfferCSV: !!offer.offerCSV,
       condition: offer.condition
     })));
     return null;
   }
   
   // Sort by price and get the lowest
-  fbmOffers.sort((a, b) => a.price - b.price);
-  console.log('FBM Debug: Using fallback FBM price:', fbmOffers[0].price / 100);
-  return fbmOffers[0].price / 100;
+  fbmOffers.sort((a, b) => a.currentPrice - b.currentPrice);
+  console.log('FBM Debug: Using fallback FBM price:', fbmOffers[0].currentPrice / 100);
+  return fbmOffers[0].currentPrice / 100;
 }
 
 serve(async (req) => {
