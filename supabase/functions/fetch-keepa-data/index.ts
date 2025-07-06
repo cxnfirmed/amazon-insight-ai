@@ -66,11 +66,20 @@ function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
   
   // offerCSV contains [timestamp, price, shipping, timestamp, price, shipping, ...]
   // We want the most recent price (last price entry)
-  for (let i = offerCSV.length - 2; i >= 0; i -= 3) {
+  // Step backwards through the array in groups of 3 (timestamp, price, shipping)
+  for (let i = offerCSV.length - 2; i >= 1; i -= 3) {
     if (offerCSV[i] && offerCSV[i] > 0) {
+      console.log('FBM Debug: Found price at index', i, ':', offerCSV[i]);
       return offerCSV[i];
     }
   }
+  
+  // If no recent price found, try the first price entry
+  if (offerCSV.length >= 2 && offerCSV[1] && offerCSV[1] > 0) {
+    console.log('FBM Debug: Using first price entry:', offerCSV[1]);
+    return offerCSV[1];
+  }
+  
   return null;
 }
 
