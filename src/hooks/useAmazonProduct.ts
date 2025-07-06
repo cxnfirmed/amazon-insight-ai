@@ -43,8 +43,51 @@ export const useAmazonProduct = () => {
     setProduct(null);
     
     try {
-      // Try to get data from SP-API first
-      console.log('Attempting to fetch from SP-API...');
+      // Try Keepa API first
+      console.log('Attempting to fetch from Keepa API first...');
+      
+      const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
+        body: { asin: identifier }
+      });
+
+      if (keepaResponse?.success && keepaResponse.data) {
+        console.log('Successfully fetched Keepa data:', keepaResponse.data.title);
+        
+        const combinedProduct: AmazonProduct = {
+          asin: identifier,
+          title: keepaResponse.data.title || 'Product Title Not Available',
+          brand: keepaResponse.data.brand || 'Unknown Brand',
+          category: 'General',
+          image_url: 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=300&h=300&fit=crop',
+          current_price: keepaResponse.data.currentPrice || null,
+          buy_box_price: keepaResponse.data.buyBoxPrice || null,
+          lowest_fba_price: keepaResponse.data.lowestFBAPrice || null,
+          lowest_fbm_price: keepaResponse.data.lowestFBMPrice || null,
+          sales_rank: keepaResponse.data.salesRank || null,
+          amazon_in_stock: keepaResponse.data.amazonInStock !== false,
+          review_count: null,
+          rating: null,
+          roi_percentage: null,
+          profit_margin: null,
+          estimated_monthly_sales: null,
+          competition_level: null,
+          amazon_risk_score: null,
+          ip_risk_score: null,
+          time_to_sell_days: null,
+          buybox_seller: 'Unknown',
+          buybox_seller_type: 'FBM'
+        };
+
+        setProduct(combinedProduct);
+        toast({
+          title: "Product Found via Keepa",
+          description: `Successfully loaded data for ${combinedProduct.title}`,
+        });
+        return;
+      }
+
+      // If Keepa fails, try SP-API as fallback
+      console.log('Keepa failed, trying SP-API as fallback...');
       
       const { data: spApiData, error: spApiError } = await supabase.functions.invoke('fetch-sp-api-data', {
         body: { asin: identifier }
@@ -92,51 +135,8 @@ export const useAmazonProduct = () => {
         return;
       }
 
-      // If SP-API fails, try Keepa as backup
-      console.log('SP-API failed, trying Keepa API as fallback...');
-      
-      const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
-        body: { asin: identifier }
-      });
-
-      if (keepaResponse?.success && keepaResponse.data) {
-        console.log('Successfully fetched Keepa data:', keepaResponse.data.title);
-        
-        const combinedProduct: AmazonProduct = {
-          asin: identifier,
-          title: keepaResponse.data.title || 'Product Title Not Available',
-          brand: keepaResponse.data.brand || 'Unknown Brand',
-          category: 'General',
-          image_url: 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=300&h=300&fit=crop',
-          current_price: keepaResponse.data.currentPrice || null,
-          buy_box_price: keepaResponse.data.buyBoxPrice || null,
-          lowest_fba_price: keepaResponse.data.lowestFBAPrice || null,
-          lowest_fbm_price: keepaResponse.data.lowestFBMPrice || null,
-          sales_rank: keepaResponse.data.salesRank || null,
-          amazon_in_stock: keepaResponse.data.amazonInStock !== false,
-          review_count: null,
-          rating: null,
-          roi_percentage: null,
-          profit_margin: null,
-          estimated_monthly_sales: null,
-          competition_level: null,
-          amazon_risk_score: null,
-          ip_risk_score: null,
-          time_to_sell_days: null,
-          buybox_seller: 'Unknown',
-          buybox_seller_type: 'FBM'
-        };
-
-        setProduct(combinedProduct);
-        toast({
-          title: "Product Found via Keepa",
-          description: `Successfully loaded data for ${combinedProduct.title}`,
-        });
-        return;
-      }
-
       // If both APIs fail, show error
-      console.error('Both SP-API and Keepa failed for ASIN:', identifier);
+      console.error('Both Keepa and SP-API failed for ASIN:', identifier);
       
       toast({
         title: "Product Not Found",
