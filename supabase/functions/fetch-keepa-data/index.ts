@@ -114,9 +114,17 @@ serve(async (req) => {
     const lowestFBAPrice = getLastNonNullValue(fbaHistory);
     const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
     
+    // Fix FBM price extraction - use correct CSV index [2] for FBM prices
     const fbmHistory = product.csv && product.csv[2] ? product.csv[2] : [];
     const lowestFBMPrice = getLastNonNullValue(fbmHistory);
     const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
+
+    console.log('FBM Debug:', {
+      fbmHistoryLength: fbmHistory?.length,
+      fbmRawValues: fbmHistory?.slice(-10), // Last 10 values for debugging
+      extractedFBMPrice: lowestFBMPrice,
+      finalFBMPriceUSD: lowestFBMPriceUSD
+    });
 
     // Extract offer count from history
     const offerHistory = product.csv && product.csv[11] ? product.csv[11] : [];
@@ -147,10 +155,11 @@ serve(async (req) => {
     // Parse historical price data from CSV format
     const priceHistory = [];
     if (product.csv && product.csv.length > 0) {
-      // Keepa CSV indices: [0] = Amazon, [1] = New, [18] = Buy Box, [3] = Sales Rank, [11] = Offer Count
+      // Process timestamps and corresponding values
       const timestamps = product.csv[0] || [];
       const buyBoxPrices = product.csv[18] || [];
-      const amazonPrices = product.csv[1] || [];
+      const fbaPrices = product.csv[1] || [];
+      const fbmPrices = product.csv[2] || [];
       const salesRanks = product.csv[3] || [];
       const offerCounts = product.csv[11] || [];
 
@@ -162,14 +171,14 @@ serve(async (req) => {
           const historyEntry = {
             timestamp,
             buyBoxPrice: buyBoxPrices[i + 1] && buyBoxPrices[i + 1] > 0 ? buyBoxPrices[i + 1] / 100 : null,
-            amazonPrice: amazonPrices[i + 1] && amazonPrices[i + 1] > 0 ? amazonPrices[i + 1] / 100 : null,
-            newPrice: amazonPrices[i + 1] && amazonPrices[i + 1] > 0 ? amazonPrices[i + 1] / 100 : null,
+            amazonPrice: fbaPrices[i + 1] && fbaPrices[i + 1] > 0 ? fbaPrices[i + 1] / 100 : null,
+            newPrice: fbmPrices[i + 1] && fbmPrices[i + 1] > 0 ? fbmPrices[i + 1] / 100 : null,
             salesRank: salesRanks[i + 1] || null,
             offerCount: offerCounts[i + 1] || 0
           };
 
           // Only add entries that have at least some useful data
-          if (historyEntry.buyBoxPrice || historyEntry.amazonPrice || historyEntry.salesRank) {
+          if (historyEntry.buyBoxPrice || historyEntry.amazonPrice || historyEntry.newPrice || historyEntry.salesRank) {
             priceHistory.push(historyEntry);
           }
         }
