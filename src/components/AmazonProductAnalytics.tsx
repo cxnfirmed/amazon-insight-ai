@@ -3,6 +3,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { 
   Star, 
   Package, 
@@ -13,9 +14,12 @@ import {
   DollarSign,
   BarChart3,
   Clock,
-  Shield
+  Shield,
+  CheckCircle,
+  XCircle,
+  Bug
 } from 'lucide-react';
-import { AmazonProduct } from '@/hooks/useAmazonProduct';
+import { AmazonProduct, useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
 import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
 
@@ -28,13 +32,16 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
   product, 
   onBack 
 }) => {
-  const getRiskColor = (score: number) => {
+  const { debugMode, setDebugMode } = useAmazonProduct();
+
+  const getRiskColor = (score: number | null | undefined) => {
+    if (!score) return 'text-gray-600';
     if (score <= 2) return 'text-green-600';
     if (score <= 4) return 'text-yellow-600';
     return 'text-red-600';
   };
 
-  const getCompetitionColor = (level: string) => {
+  const getCompetitionColor = (level: string | null | undefined) => {
     switch (level?.toLowerCase()) {
       case 'low': return 'bg-green-100 text-green-800';
       case 'medium': return 'bg-yellow-100 text-yellow-800';
@@ -43,14 +50,82 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
     }
   };
 
+  const getDataSourceBadge = () => {
+    switch (product.data_source) {
+      case 'SP-API':
+        return <Badge className="bg-blue-100 text-blue-800">Live SP-API Data</Badge>;
+      case 'Keepa':
+        return <Badge className="bg-green-100 text-green-800">Real Keepa Data</Badge>;
+      case 'Error':
+        return <Badge className="bg-red-100 text-red-800">Data Error</Badge>;
+      default:
+        return <Badge className="bg-gray-100 text-gray-800">Unknown Source</Badge>;
+    }
+  };
+
+  const formatValue = (value: any, type: 'price' | 'number' | 'text' = 'text') => {
+    if (value === null || value === undefined) return 'Data not available';
+    
+    switch (type) {
+      case 'price':
+        return typeof value === 'number' ? `$${value.toFixed(2)}` : 'Data not available';
+      case 'number':
+        return typeof value === 'number' ? value.toLocaleString() : 'Data not available';
+      default:
+        return value.toString();
+    }
+  };
+
+  if (product.data_source === 'Error') {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Button onClick={onBack} variant="outline">
+            ← Back to Search
+          </Button>
+          <Badge variant="outline">ASIN: {product.asin}</Badge>
+        </div>
+
+        <Card className="bg-red-50 dark:bg-red-950/20 backdrop-blur-sm border-red-200">
+          <CardContent className="p-6 text-center">
+            <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">
+              Unable to Fetch Product Data
+            </h2>
+            <p className="text-red-600 dark:text-red-300 mb-4">
+              Both SP-API and Keepa failed to return data for ASIN: {product.asin}
+            </p>
+            <p className="text-sm text-red-500 dark:text-red-400">
+              This could be due to API limits, invalid ASIN, or network issues.
+            </p>
+            {debugMode && product.debug_data && (
+              <div className="mt-4 p-4 bg-gray-100 dark:bg-gray-800 rounded text-left text-xs">
+                <strong>Debug Data:</strong>
+                <pre>{JSON.stringify(product.debug_data, null, 2)}</pre>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Back button and header */}
+      {/* Header with debug toggle */}
       <div className="flex items-center justify-between">
         <Button onClick={onBack} variant="outline">
           ← Back to Search
         </Button>
-        <Badge variant="outline">ASIN: {product.asin}</Badge>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Bug className="w-4 h-4" />
+            <span className="text-sm">Debug Mode</span>
+            <Switch checked={debugMode} onCheckedChange={setDebugMode} />
+          </div>
+          {getDataSourceBadge()}
+          <Badge variant="outline">ASIN: {product.asin}</Badge>
+        </div>
       </div>
 
       {/* Product Info Card */}
@@ -80,7 +155,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                       {product.rating}
                     </span>
                     <span className="text-slate-600 dark:text-slate-400">
-                      ({product.review_count?.toLocaleString()} reviews)
+                      ({formatValue(product.review_count, 'number')} reviews)
                     </span>
                   </div>
                 )}
@@ -93,27 +168,26 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 </Badge>
                 <Badge variant="secondary" className="flex items-center gap-1">
                   <Truck className="w-3 h-3" />
-                  FBA Eligible
+                  {product.inventory_level || 'Stock level unknown'}
                 </Badge>
                 {product.brand && <Badge variant="outline">{product.brand}</Badge>}
-                {product.buybox_seller && (
-                  <Badge variant="outline">
-                    Buybox: {product.buybox_seller} ({product.buybox_seller_type})
-                  </Badge>
-                )}
+                {product.category && <Badge variant="outline">{product.category}</Badge>}
               </div>
               
               <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
-                {product.category && <p><strong>Category:</strong> {product.category}</p>}
-                {product.dimensions && <p><strong>Dimensions:</strong> {product.dimensions}</p>}
-                {product.weight && <p><strong>Weight:</strong> {product.weight}</p>}
-                {product.sales_rank && <p><strong>Sales Rank:</strong> #{product.sales_rank?.toLocaleString()}</p>}
+                <p><strong>Brand:</strong> {formatValue(product.brand)}</p>
+                <p><strong>Category:</strong> {formatValue(product.category)}</p>
+                <p><strong>Sales Rank:</strong> {formatValue(product.sales_rank, 'number')}</p>
+                <p><strong>Data Source:</strong> {product.data_source}</p>
+                {product.last_updated && (
+                  <p><strong>Last Updated:</strong> {new Date(product.last_updated).toLocaleString()}</p>
+                )}
               </div>
             </div>
             
             <div className="text-right">
               <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
-                ${product.buy_box_price?.toFixed(2) || 'N/A'}
+                {formatValue(product.buy_box_price, 'price')}
               </div>
               <div className="text-sm text-slate-600 dark:text-slate-400">
                 Buy Box Price
@@ -128,32 +202,18 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
         </CardContent>
       </Card>
 
-      {/* Enhanced Analytics Overview */}
+      {/* Analytics Overview - Only show real data */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-green-500" />
-              ROI
+              Monthly Sales
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">
-              {product.roi_percentage ? `${product.roi_percentage.toFixed(1)}%` : 'N/A'}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-blue-500" />
-              Profit Margin
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">
-              ${product.profit_margin?.toFixed(2) || 'N/A'}
+              {formatValue(product.estimated_monthly_sales, 'number')}
             </div>
           </CardContent>
         </Card>
@@ -162,12 +222,12 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-purple-500" />
-              Monthly Sales
+              Sales Rank
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-purple-600">
-              {product.estimated_monthly_sales?.toLocaleString() || 'N/A'}
+              {formatValue(product.sales_rank, 'number')}
             </div>
           </CardContent>
         </Card>
@@ -175,13 +235,27 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
         <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Clock className="w-4 h-4 text-orange-500" />
-              Time to Sell
+              <Package className="w-4 h-4 text-blue-500" />
+              Offer Count
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {formatValue(product.offer_count, 'number')}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Truck className="w-4 h-4 text-orange-500" />
+              Prime Offers
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
-              {product.time_to_sell_days ? `${product.time_to_sell_days} days` : 'N/A'}
+              {formatValue(product.prime_eligible_offers, 'number')}
             </div>
           </CardContent>
         </Card>
@@ -190,17 +264,13 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Shield className="w-4 h-4 text-red-500" />
-              Buy Score
+              Risk Score
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${
-              (product.roi_percentage || 0) >= 30 ? 'text-green-600' : 
-              (product.roi_percentage || 0) >= 15 ? 'text-yellow-600' : 'text-red-600'
-            }`}>
-              {Math.min(Math.floor((product.roi_percentage || 0) * 2), 100)}
+            <div className={`text-2xl font-bold ${getRiskColor(product.amazon_risk_score)}`}>
+              {product.amazon_risk_score || 'N/A'}/5
             </div>
-            <div className="text-xs text-slate-500">/ 100</div>
           </CardContent>
         </Card>
       </div>
@@ -208,13 +278,13 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Enhanced Price History Chart with real data */}
+          {/* Real Price History Chart */}
           <EnhancedPriceHistoryChart 
             product={product}
-            title="Live Price & Sales History"
+            title="Real Price & Sales History"
           />
           
-          {/* Advanced Profitability Calculator */}
+          {/* Profitability Calculator */}
           <ProfitabilityCalculator 
             initialData={{
               sellPrice: product.buy_box_price,
@@ -229,36 +299,40 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
         </div>
 
         <div className="space-y-6">
-          {/* Pricing & Competition */}
+          {/* Real Pricing & Competition */}
           <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
             <CardHeader>
-              <CardTitle>Live Pricing Analysis</CardTitle>
+              <CardTitle>Real Pricing Analysis</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Buy Box Price:</span>
-                <span className="font-semibold">${product.buy_box_price?.toFixed(2) || 'N/A'}</span>
+                <span className="font-semibold">{formatValue(product.buy_box_price, 'price')}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
                 <span className="font-semibold text-green-600">
-                  {product.lowest_fba_price ? `$${product.lowest_fba_price.toFixed(2)}` : 'N/A'}
+                  {formatValue(product.lowest_fba_price, 'price')}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
                 <span className="font-semibold text-blue-600">
-                  {product.lowest_fbm_price ? `$${product.lowest_fbm_price.toFixed(2)}` : 'N/A'}
+                  {formatValue(product.lowest_fbm_price, 'price')}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Offer Count:</span>
-                <span className="font-semibold">{Math.floor(Math.random() * 20) + 3}</span>
+                <span className="text-slate-600 dark:text-slate-400">Total Offers:</span>
+                <span className="font-semibold">{formatValue(product.offer_count, 'number')}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 dark:text-slate-400">30d Avg:</span>
+                <span className="font-semibold">{formatValue(product.avg_price_30, 'price')}</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Risk Assessment */}
+          {/* Real Risk Assessment */}
           <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Risk Assessment</CardTitle>
@@ -266,26 +340,38 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Competition Level:</span>
-                <Badge className={getCompetitionColor(product.competition_level || '')}>
-                  {product.competition_level || 'Medium'}
+                <Badge className={getCompetitionColor(product.competition_level)}>
+                  {product.competition_level || 'Unknown'}
                 </Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Amazon Risk:</span>
-                <span className={`font-semibold ${getRiskColor(product.amazon_risk_score || 0)}`}>
-                  {product.amazon_risk_score ? `${product.amazon_risk_score}/5` : '2/5'}
+                <span className={`font-semibold ${getRiskColor(product.amazon_risk_score)}`}>
+                  {product.amazon_risk_score || 'N/A'}/5
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">IP Risk:</span>
-                <span className={`font-semibold ${getRiskColor(product.ip_risk_score || 0)}`}>
-                  {product.ip_risk_score ? `${product.ip_risk_score}/5` : '1/5'}
+                <span className={`font-semibold ${getRiskColor(product.ip_risk_score)}`}>
+                  {product.ip_risk_score || 'N/A'}/5
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Eligible to Sell:</span>
-                <span className="font-semibold text-green-600">✓ Yes</span>
+                <span className="text-slate-600 dark:text-slate-400">Can Sell:</span>
+                <span className={`font-semibold ${product.seller_eligibility?.can_sell ? 'text-green-600' : 'text-red-600'}`}>
+                  {product.seller_eligibility?.can_sell ? '✓ Yes' : '✗ No'}
+                </span>
               </div>
+              {product.seller_eligibility?.restrictions?.length > 0 && (
+                <div className="text-xs text-red-600">
+                  <strong>Restrictions:</strong>
+                  <ul className="list-disc list-inside mt-1">
+                    {product.seller_eligibility.restrictions.slice(0, 3).map((restriction, idx) => (
+                      <li key={idx}>{restriction}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -311,6 +397,23 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           </Card>
         </div>
       </div>
+
+      {/* Debug Panel */}
+      {debugMode && product.debug_data && (
+        <Card className="bg-gray-50 dark:bg-gray-900 border-gray-300">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bug className="w-5 h-5" />
+              Debug Data - Raw API Response
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="text-xs overflow-auto max-h-96 bg-white dark:bg-black p-4 rounded">
+              {JSON.stringify(product.debug_data, null, 2)}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

@@ -28,7 +28,6 @@ export interface AmazonProduct {
   time_to_sell_days?: number;
   buybox_seller?: string;
   buybox_seller_type?: 'Amazon' | 'FBA' | 'FBM';
-  // Enhanced seller data
   inventory_level?: string;
   offer_count?: number;
   prime_eligible_offers?: number;
@@ -39,7 +38,6 @@ export interface AmazonProduct {
     requires_approval: boolean;
     category_gated: boolean;
   };
-  // Enhanced historical data
   price_history?: Array<{
     timestamp: string;
     buyBoxPrice?: number;
@@ -52,7 +50,6 @@ export interface AmazonProduct {
     amazonInStock?: boolean;
     offerCount?: number;
   }>;
-  // Additional product details
   features?: string[];
   description?: string;
   manufacturer?: string;
@@ -66,187 +63,68 @@ export interface AmazonProduct {
   avg_price_30?: number;
   avg_price_90?: number;
   avg_price_180?: number;
+  data_source?: 'SP-API' | 'Keepa' | 'Error';
+  last_updated?: string;
+  debug_data?: any;
 }
 
 export const useAmazonProduct = () => {
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState<AmazonProduct | null>(null);
+  const [debugMode, setDebugMode] = useState(false);
   const { toast } = useToast();
-
-  // Enhanced Keepa category mapping
-  const keepaCategoryMap: { [key: number]: string } = {
-    1: 'Books',
-    2: 'Movies & TV',
-    3: 'Music',
-    4: 'Video Games',
-    5: 'Electronics',
-    6: 'Camera & Photo',
-    7: 'Computers',
-    8: 'Cell Phones & Accessories',
-    9: 'Sports & Outdoors',
-    10: 'Home & Garden',
-    11: 'Tools & Home Improvement',
-    12: 'Automotive',
-    13: 'Health & Personal Care',
-    14: 'Beauty',
-    15: 'Grocery & Gourmet Food',
-    16: 'Pet Supplies',
-    17: 'Baby',
-    18: 'Clothing, Shoes & Jewelry',
-    19: 'Handmade',
-    20: 'Arts, Crafts & Sewing',
-    21: 'Industrial & Scientific',
-    22: 'Kitchen & Dining',
-    23: 'Office Products',
-    24: 'Patio, Lawn & Garden',
-    25: 'Toys & Games',
-    26: 'Everything Else'
-  };
 
   const fetchProduct = async (identifier: string, forceFresh: boolean = false) => {
     if (!identifier) return;
 
-    console.log('Starting fetchProduct for identifier:', identifier, 'forceFresh:', forceFresh);
+    console.log('Starting product fetch for ASIN:', identifier);
     setLoading(true);
     setProduct(null);
     
     try {
-      // Try Keepa API first for comprehensive historical data
-      console.log('Attempting to fetch from enhanced Keepa API...');
+      // First attempt: SP-API for connected sellers
+      console.log('Attempting SP-API fetch...');
       
-      const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
-        body: { asin: identifier }
+      const { data: spApiResponse, error: spApiError } = await supabase.functions.invoke('fetch-sp-api-data', {
+        body: { asin: identifier, marketplaceId: 'ATVPDKIKX0DER' }
       });
 
-      if (keepaResponse?.success && keepaResponse.data) {
-        console.log('Successfully fetched enhanced Keepa data:', keepaResponse.data);
+      if (spApiResponse?.success && spApiResponse.data) {
+        console.log('SP-API fetch successful:', spApiResponse.data);
         
-        // Generate product image URL from Amazon
-        const amazonImageUrl = `https://images-na.ssl-images-amazon.com/images/P/${identifier}.01.L.jpg`;
-        
-        // Extract comprehensive pricing data
-        const buyBoxPrice = keepaResponse.data.buyBoxPrice && keepaResponse.data.buyBoxPrice > 0 
-          ? keepaResponse.data.buyBoxPrice : null;
-        const currentPrice = keepaResponse.data.currentPrice && keepaResponse.data.currentPrice > 0 
-          ? keepaResponse.data.currentPrice : null;
-        
-        // Extract real category from Keepa data
-        let categoryName = 'Unknown Category';
-        if (keepaResponse.data.categories && keepaResponse.data.categories.length > 0) {
-          const categoryId = keepaResponse.data.categories[0];
-          categoryName = keepaCategoryMap[categoryId] || `Category ${categoryId}`;
-        }
+        const spData = spApiResponse.data;
+        const productDetails = spData.productDetails;
+        const pricing = spData.pricing;
+        const inventory = spData.inventory;
+        const sales = spData.sales;
+        const eligibility = spData.eligibility;
+        const competition = spData.competitionAnalysis;
+        const fees = spData.fees;
 
-        const combinedProduct: AmazonProduct = {
+        // Build product from real SP-API data
+        const spApiProduct: AmazonProduct = {
           asin: identifier,
-          title: keepaResponse.data.title || 'Product Title Not Available',
-          brand: keepaResponse.data.brand || null,
-          category: categoryName,
-          image_url: amazonImageUrl,
-          description: keepaResponse.data.description || null,
-          manufacturer: keepaResponse.data.manufacturer || null,
-          model: keepaResponse.data.model || null,
-          color: keepaResponse.data.color || null,
-          size: keepaResponse.data.size || null,
-          package_quantity: keepaResponse.data.packageQuantity || 1,
-          hazardous_material: keepaResponse.data.hazardousMaterialType || 0,
-          
-          // Pricing data
-          current_price: currentPrice,
-          buy_box_price: buyBoxPrice,
-          lowest_fba_price: keepaResponse.data.lowestFBAPrice,
-          lowest_fbm_price: keepaResponse.data.lowestFBMPrice,
-          avg_price_30: keepaResponse.data.avgPrice30,
-          avg_price_90: keepaResponse.data.avgPrice90,
-          avg_price_180: keepaResponse.data.avgPrice180,
-          
-          // Sales and inventory data
-          sales_rank: keepaResponse.data.salesRank || null,
-          estimated_monthly_sales: keepaResponse.data.estimatedMonthlySales || null,
-          amazon_in_stock: keepaResponse.data.amazonInStock === true,
-          inventory_level: keepaResponse.data.inventoryLevel || 'Unknown',
-          
-          // Seller and competition data
-          offer_count: keepaResponse.data.offerCount || 0,
-          prime_eligible_offers: keepaResponse.data.primeEligibleOffers || 0,
-          amazon_seller_present: keepaResponse.data.amazonSellerPresent || false,
-          competition_level: keepaResponse.data.competitionLevel || 'Medium',
-          
-          // Risk assessment
-          amazon_risk_score: keepaResponse.data.amazonRiskScore || 2,
-          ip_risk_score: keepaResponse.data.ipRiskScore || 1,
-          
-          // Enhanced features
-          features: keepaResponse.data.features || [],
-          release_date: keepaResponse.data.releaseDate || null,
-          last_price_change: keepaResponse.data.lastPriceChange || null,
-          
-          // Historical data
-          price_history: keepaResponse.data.priceHistory || [],
-          
-          // Default values for missing data
-          review_count: null,
-          rating: null,
-          roi_percentage: null,
-          profit_margin: null,
-          time_to_sell_days: null,
-          buybox_seller: 'Amazon',
-          buybox_seller_type: 'FBA'
-        };
-
-        setProduct(combinedProduct);
-        toast({
-          title: "Enhanced Product Data Loaded",
-          description: `Successfully loaded comprehensive data for ${combinedProduct.title}`,
-        });
-        return;
-      }
-
-      // If Keepa fails, try enhanced SP-API as fallback
-      console.log('Keepa failed, trying enhanced SP-API as fallback...');
-      
-      const { data: spApiData, error: spApiError } = await supabase.functions.invoke('fetch-sp-api-data', {
-        body: { asin: identifier }
-      });
-
-      if (spApiData?.success && spApiData?.data) {
-        console.log('Successfully fetched enhanced SP-API data');
-        
-        const productDetails = spApiData.data.productDetails;
-        const pricing = spApiData.data.pricing;
-        const inventory = spApiData.data.inventory;
-        const sales = spApiData.data.sales;
-        const eligibility = spApiData.data.eligibility;
-        const competition = spApiData.data.competitionAnalysis;
-        const risk = spApiData.data.riskAssessment;
-        
-        // Extract real category from SP-API data
-        let categoryName = 'Unknown Category';
-        if (productDetails?.categories && productDetails.categories.length > 0) {
-          categoryName = productDetails.categories[0];
-        }
-        
-        const combinedProduct: AmazonProduct = {
-          asin: identifier,
-          title: productDetails?.title || 'Product Title Not Available',
+          title: productDetails?.title || 'Product title not available',
           brand: productDetails?.brand || null,
-          category: categoryName,
-          image_url: productDetails?.images?.[0]?.link || `https://images-na.ssl-images-amazon.com/images/P/${identifier}.01.L.jpg`,
+          category: productDetails?.categories?.[0] || null,
+          image_url: productDetails?.images?.[0]?.link || null,
+          dimensions: productDetails?.dimensions ? 
+            `${productDetails.dimensions.length} x ${productDetails.dimensions.width} x ${productDetails.dimensions.height}` : null,
+          weight: productDetails?.weight || null,
           description: productDetails?.description || null,
           manufacturer: productDetails?.manufacturer || null,
           model: productDetails?.model || null,
           color: productDetails?.color || null,
           size: productDetails?.size || null,
-          dimensions: productDetails?.dimensions || 'Not specified',
-          weight: productDetails?.weight || 'Not specified',
+          features: productDetails?.features || [],
           
-          // Pricing data
+          // Real pricing data from SP-API
           current_price: pricing?.buyBoxPrice || null,
           buy_box_price: pricing?.buyBoxPrice || null,
           lowest_fba_price: pricing?.lowestFBAPrice || null,
           lowest_fbm_price: pricing?.lowestFBMPrice || null,
           
-          // Sales and inventory data
+          // Real inventory and sales data
           sales_rank: productDetails?.salesRank || null,
           estimated_monthly_sales: sales?.estimatedMonthlySales || null,
           amazon_in_stock: inventory?.availableQuantity > 0,
@@ -254,13 +132,14 @@ export const useAmazonProduct = () => {
                           inventory?.availableQuantity > 10 ? 'Medium Stock' : 
                           inventory?.availableQuantity > 0 ? 'Low Stock' : 'Out of Stock',
           
-          // Seller and competition data
+          // Real competition data
           offer_count: competition?.totalOffers || 0,
           prime_eligible_offers: competition?.primeOffers || 0,
           amazon_seller_present: competition?.fbaOffers > 0,
-          competition_level: risk?.competitionLevel || 'Medium',
+          competition_level: competition?.totalOffers < 5 ? 'Low' : 
+                           competition?.totalOffers < 15 ? 'Medium' : 'High',
           
-          // Seller eligibility
+          // Real seller eligibility
           seller_eligibility: {
             can_sell: eligibility?.canSell || false,
             restrictions: eligibility?.restrictions?.map((r: any) => r.message) || [],
@@ -268,50 +147,145 @@ export const useAmazonProduct = () => {
             category_gated: eligibility?.categoryGated || false
           },
           
-          // Risk assessment
-          amazon_risk_score: risk?.restrictionCount > 0 ? 4 : 2,
+          // Buy box info
+          buybox_seller: pricing?.offers?.[0]?.sellerId || 'Unknown',
+          buybox_seller_type: pricing?.offers?.[0]?.fulfillmentChannel === 'Amazon' ? 'FBA' : 'FBM',
+          
+          // Risk assessment from real data
+          amazon_risk_score: eligibility?.restrictions?.length > 0 ? 4 : 1,
           ip_risk_score: productDetails?.brand ? 1 : 3,
           
-          // Enhanced features
-          features: productDetails?.features || [],
-          
-          // Default values
-          review_count: null,
-          rating: null,
-          roi_percentage: null,
-          profit_margin: null,
-          time_to_sell_days: null,
-          buybox_seller: pricing?.buyboxSeller || 'Amazon',
-          buybox_seller_type: pricing?.buyboxSellerType || 'FBA'
+          data_source: 'SP-API',
+          last_updated: new Date().toISOString(),
+          debug_data: debugMode ? spApiResponse : undefined
         };
 
-        setProduct(combinedProduct);
+        setProduct(spApiProduct);
         toast({
-          title: "Enhanced Product Data Loaded via SP-API",
-          description: `Successfully loaded comprehensive data for ${combinedProduct.title}`,
+          title: "Real SP-API Data Loaded",
+          description: `Live Amazon data loaded for ${spApiProduct.title}`,
         });
         return;
       }
 
-      // If both APIs fail, show error
-      console.error('Both enhanced Keepa and SP-API failed for ASIN:', identifier);
+      // Second attempt: Keepa API fallback
+      console.log('SP-API failed, attempting Keepa fallback...', spApiError);
+      
+      const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
+        body: { asin: identifier, domain: 1 }
+      });
+
+      if (keepaResponse?.success && keepaResponse.data) {
+        console.log('Keepa fetch successful:', keepaResponse.data);
+        
+        const keepaData = keepaResponse.data;
+        
+        // Extract real category from Keepa
+        const keepaCategoryMap: { [key: number]: string } = {
+          1: 'Books', 2: 'Movies & TV', 3: 'Music', 4: 'Video Games', 5: 'Electronics',
+          6: 'Camera & Photo', 7: 'Computers', 8: 'Cell Phones & Accessories', 
+          9: 'Sports & Outdoors', 10: 'Home & Garden', 11: 'Tools & Home Improvement',
+          12: 'Automotive', 13: 'Health & Personal Care', 14: 'Beauty', 
+          15: 'Grocery & Gourmet Food', 16: 'Pet Supplies', 17: 'Baby',
+          18: 'Clothing, Shoes & Jewelry', 19: 'Handmade', 20: 'Arts, Crafts & Sewing'
+        };
+
+        const categoryName = keepaData.categories?.[0] ? 
+          keepaCategoryMap[keepaData.categories[0]] || `Category ${keepaData.categories[0]}` : null;
+
+        // Build product from real Keepa data
+        const keepaProduct: AmazonProduct = {
+          asin: identifier,
+          title: keepaData.title || 'Product title not available',
+          brand: keepaData.brand || null,
+          category: categoryName,
+          image_url: `https://images-na.ssl-images-amazon.com/images/P/${identifier}.01.L.jpg`,
+          description: keepaData.description || null,
+          manufacturer: keepaData.manufacturer || null,
+          model: keepaData.model || null,
+          color: keepaData.color || null,
+          size: keepaData.size || null,
+          features: keepaData.features || [],
+          
+          // Real pricing from Keepa
+          current_price: keepaData.currentPrice || null,
+          buy_box_price: keepaData.buyBoxPrice || null,
+          lowest_fba_price: keepaData.lowestFBAPrice || null,
+          lowest_fbm_price: keepaData.lowestFBMPrice || null,
+          avg_price_30: keepaData.avgPrice30 || null,
+          avg_price_90: keepaData.avgPrice90 || null,
+          avg_price_180: keepaData.avgPrice180 || null,
+          
+          // Real sales and inventory from Keepa
+          sales_rank: keepaData.salesRank || null,
+          estimated_monthly_sales: keepaData.estimatedMonthlySales || null,
+          amazon_in_stock: keepaData.amazonInStock === true,
+          inventory_level: keepaData.inventoryLevel || 'Data not available',
+          
+          // Real competition data from Keepa
+          offer_count: keepaData.offerCount || 0,
+          prime_eligible_offers: keepaData.primeEligibleOffers || 0,
+          amazon_seller_present: keepaData.amazonSellerPresent || false,
+          competition_level: keepaData.competitionLevel || 'Medium',
+          
+          // Buy box from Keepa
+          buybox_seller: 'Data not available',
+          buybox_seller_type: 'FBA',
+          
+          // Real historical data
+          price_history: keepaData.priceHistory || [],
+          
+          // Risk scores from Keepa
+          amazon_risk_score: keepaData.amazonRiskScore || 2,
+          ip_risk_score: keepaData.ipRiskScore || 1,
+          
+          data_source: 'Keepa',
+          last_updated: new Date().toISOString(),
+          debug_data: debugMode ? keepaResponse : undefined
+        };
+
+        setProduct(keepaProduct);
+        toast({
+          title: "Real Keepa Data Loaded",
+          description: `Historical data loaded for ${keepaProduct.title}`,
+        });
+        return;
+      }
+
+      // Both APIs failed
+      console.error('Both SP-API and Keepa failed:', { spApiError, keepaError });
       
       toast({
-        title: "Product Not Found",
-        description: `Unable to fetch comprehensive product data for ASIN ${identifier}. Please check the ASIN and try again.`,
+        title: "Product Data Unavailable",
+        description: `Unable to fetch real data for ASIN ${identifier}. Both SP-API and Keepa failed.`,
         variant: "destructive",
       });
 
-      throw new Error('Unable to fetch product data from any source');
+      // Set error state product
+      setProduct({
+        asin: identifier,
+        title: 'Product data not available',
+        data_source: 'Error',
+        last_updated: new Date().toISOString(),
+        debug_data: debugMode ? { spApiError, keepaError } : undefined
+      } as AmazonProduct);
 
     } catch (error) {
-      console.error('Error in fetchProduct:', error);
+      console.error('Critical error in fetchProduct:', error);
       
       toast({
-        title: "Error",
-        description: `Failed to fetch comprehensive product data: ${error.message}`,
+        title: "System Error",
+        description: `Critical error fetching product data: ${error.message}`,
         variant: "destructive",
       });
+
+      setProduct({
+        asin: identifier,
+        title: 'System error occurred',
+        data_source: 'Error',
+        last_updated: new Date().toISOString(),
+        debug_data: debugMode ? { error: error.message } : undefined
+      } as AmazonProduct);
     } finally {
       setLoading(false);
     }
@@ -321,6 +295,8 @@ export const useAmazonProduct = () => {
     loading,
     product,
     fetchProduct,
-    setProduct
+    setProduct,
+    debugMode,
+    setDebugMode
   };
 };

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,8 +9,12 @@ interface PriceHistoryData {
   buyBoxPrice?: number;
   amazonPrice?: number;
   newPrice?: number;
+  usedPrice?: number;
+  newFBAPrice?: number;
+  newFBMPrice?: number;
   salesRank?: number;
-  amazonInStock?: number;
+  amazonInStock?: boolean;
+  offerCount?: number;
 }
 
 interface EnhancedPriceHistoryChartProps {
@@ -23,50 +26,31 @@ interface EnhancedPriceHistoryChartProps {
 export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps> = ({ 
   data,
   product,
-  title = "Live Price & Sales History" 
+  title = "Real Price & Sales History" 
 }) => {
   const [timeRange, setTimeRange] = useState('90d');
   const [chartType, setChartType] = useState('price');
 
-  // Use either provided data or generate from product price history
-  const getPriceHistoryData = () => {
+  // Get real price history data from product
+  const getRealPriceHistoryData = (): PriceHistoryData[] => {
+    // Use provided data first
     if (data && data.length > 0) {
+      console.log('Using provided price history data:', data.length, 'points');
       return data;
     }
     
+    // Use product's real price history from Keepa/SP-API
     if (product?.price_history && product.price_history.length > 0) {
+      console.log('Using product price history from', product.data_source, ':', product.price_history.length, 'points');
       return product.price_history;
     }
     
-    // Generate realistic data based on current product data as fallback
-    if (product?.buy_box_price) {
-      const historyData = [];
-      const basePrice = product.buy_box_price;
-      
-      for (let i = 90; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        
-        const priceVariation = (Math.random() - 0.5) * (basePrice * 0.08);
-        const currentPrice = Math.max(basePrice + priceVariation, basePrice * 0.85);
-        
-        historyData.push({
-          timestamp: date.toISOString(),
-          buyBoxPrice: currentPrice,
-          amazonPrice: product.amazon_in_stock ? currentPrice + Math.random() * 2 : null,
-          newPrice: product.lowest_fbm_price || (currentPrice - Math.random() * 3),
-          salesRank: product.sales_rank || (Math.floor(Math.random() * 15000) + 5000),
-          amazonInStock: product.amazon_in_stock ? (Math.random() > 0.1 ? 1 : 0) : 0
-        });
-      }
-      return historyData;
-    }
-    
+    console.log('No real price history data available');
     return [];
   };
 
   const getFilteredData = () => {
-    const allData = getPriceHistoryData();
+    const allData = getRealPriceHistoryData();
     if (!allData || allData.length === 0) return [];
     
     const now = new Date();
@@ -80,8 +64,10 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
     }
     
     const cutoffDate = new Date(now.getTime() - (daysBack * 24 * 60 * 60 * 1000));
+    const filtered = allData.filter(item => new Date(item.timestamp) >= cutoffDate);
     
-    return allData.filter(item => new Date(item.timestamp) >= cutoffDate);
+    console.log(`Filtered ${allData.length} data points to ${filtered.length} for ${timeRange} range`);
+    return filtered;
   };
 
   const filteredData = getFilteredData();
@@ -99,33 +85,57 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
     { value: 'stock', label: 'Stock Status' }
   ];
 
+  const getDataSourceBadge = () => {
+    if (filteredData.length === 0) return null;
+    
+    return (
+      <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
+        Real {product?.data_source || 'Historical'} Data
+      </span>
+    );
+  };
+
   if (!filteredData || filteredData.length === 0) {
     return (
       <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-slate-200 dark:border-slate-700">
         <CardHeader>
-          <CardTitle>{title}</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            {title}
+            <span className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 px-2 py-1 rounded">
+              No Real Data Available
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center h-64">
-            <p className="text-slate-600 dark:text-slate-400">No historical data available</p>
+            <div className="text-center">
+              <p className="text-slate-600 dark:text-slate-400 mb-2">No historical price data available</p>
+              <p className="text-sm text-slate-500 dark:text-slate-500">
+                {product?.data_source === 'Error' 
+                  ? 'API calls failed for this product'
+                  : 'This product may be new or have limited historical data'
+                }
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
     );
   }
 
+  // Determine which price lines to show based on available data
+  const hasValidData = (dataKey: keyof PriceHistoryData) => {
+    return filteredData.some(d => d[dataKey] !== null && d[dataKey] !== undefined && d[dataKey] > 0);
+  };
+
   return (
     <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-slate-200 dark:border-slate-700">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            {title}
-            {product?.price_history && product.price_history.length > 0 && (
-              <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                Real Data
-              </span>
-            )}
-          </CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle>{title}</CardTitle>
+            {getDataSourceBadge()}
+          </div>
           
           <div className="flex gap-2">
             <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
@@ -172,13 +182,17 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
                 />
                 <YAxis 
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => `$${value.toFixed(0)}`}
+                  tickFormatter={(value) => `$${value?.toFixed(0) || '0'}`}
                 />
                 <Tooltip 
                   labelFormatter={(value) => new Date(value).toLocaleDateString()}
-                  formatter={(value: any, name) => [`$${value?.toFixed(2) || 'N/A'}`, name]}
+                  formatter={(value: any, name) => [
+                    value !== null && value !== undefined ? `$${Number(value).toFixed(2)}` : 'N/A', 
+                    name
+                  ]}
                 />
-                {filteredData.some(d => d.buyBoxPrice && d.buyBoxPrice > 0) && (
+                
+                {hasValidData('buyBoxPrice') && (
                   <Line 
                     type="monotone" 
                     dataKey="buyBoxPrice" 
@@ -189,7 +203,8 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
                     connectNulls={false}
                   />
                 )}
-                {filteredData.some(d => d.amazonPrice && d.amazonPrice > 0) && (
+                
+                {hasValidData('amazonPrice') && (
                   <Line 
                     type="monotone" 
                     dataKey="amazonPrice" 
@@ -200,13 +215,38 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
                     connectNulls={false}
                   />
                 )}
-                {filteredData.some(d => d.newPrice && d.newPrice > 0) && (
+                
+                {hasValidData('newPrice') && (
                   <Line 
                     type="monotone" 
                     dataKey="newPrice" 
                     stroke="#F59E0B" 
                     strokeWidth={2}
                     name="Lowest New Price"
+                    dot={false}
+                    connectNulls={false}
+                  />
+                )}
+                
+                {hasValidData('newFBAPrice') && (
+                  <Line 
+                    type="monotone" 
+                    dataKey="newFBAPrice" 
+                    stroke="#8B5CF6" 
+                    strokeWidth={1}
+                    name="New FBA Price"
+                    dot={false}
+                    connectNulls={false}
+                  />
+                )}
+                
+                {hasValidData('newFBMPrice') && (
+                  <Line 
+                    type="monotone" 
+                    dataKey="newFBMPrice" 
+                    stroke="#EF4444" 
+                    strokeWidth={1}
+                    name="New FBM Price"
                     dot={false}
                     connectNulls={false}
                   />
@@ -223,11 +263,11 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
                 <YAxis 
                   tick={{ fontSize: 12 }}
                   domain={['dataMin - 1000', 'dataMax + 1000']}
-                  tickFormatter={(value) => `#${value.toLocaleString()}`}
+                  tickFormatter={(value) => `#${value?.toLocaleString() || '0'}`}
                 />
                 <Tooltip 
                   labelFormatter={(value) => new Date(value).toLocaleDateString()}
-                  formatter={(value: any) => [`#${value?.toLocaleString() || 'N/A'}`, 'Sales Rank']}
+                  formatter={(value: any) => [`#${Number(value)?.toLocaleString() || 'N/A'}`, 'Sales Rank']}
                 />
                 <Area 
                   type="monotone" 
@@ -269,32 +309,43 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
         <div className="mt-4 flex items-center justify-center gap-6 text-sm">
           {chartType === 'price' && (
             <>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                <span className="text-slate-600 dark:text-slate-400">Buy Box Price</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-slate-600 dark:text-slate-400">Amazon Price</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                <span className="text-slate-600 dark:text-slate-400">Lowest New Price</span>
-              </div>
+              {hasValidData('buyBoxPrice') && (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                  <span className="text-slate-600 dark:text-slate-400">Buy Box Price</span>
+                </div>
+              )}
+              {hasValidData('amazonPrice') && (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span className="text-slate-600 dark:text-slate-400">Amazon Price</span>
+                </div>
+              )}
+              {hasValidData('newPrice') && (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                  <span className="text-slate-600 dark:text-slate-400">Lowest New Price</span>
+                </div>
+              )}
             </>
           )}
-          {chartType === 'rank' && (
+          {chartType === 'rank' && hasValidData('salesRank') && (
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
               <span className="text-slate-600 dark:text-slate-400">Sales Rank (Lower is Better)</span>
             </div>
           )}
-          {chartType === 'stock' && (
+          {chartType === 'stock' && hasValidData('amazonInStock') && (
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-green-500 rounded-full"></div>
               <span className="text-slate-600 dark:text-slate-400">Amazon Stock Status</span>
             </div>
           )}
+        </div>
+        
+        <div className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">
+          Showing {filteredData.length} real data points from {product?.data_source || 'API'} | 
+          Last updated: {product?.last_updated ? new Date(product.last_updated).toLocaleString() : 'Unknown'}
         </div>
       </CardContent>
     </Card>

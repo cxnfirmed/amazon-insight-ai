@@ -32,9 +32,9 @@ serve(async (req) => {
       throw new Error('Amazon SP-API credentials not configured');
     }
 
-    console.log(`Fetching comprehensive SP-API data for ASIN: ${asin}`);
+    console.log(`Fetching real SP-API data for ASIN: ${asin}`);
 
-    // Get access token
+    // Get real access token
     const tokenResponse = await fetch('https://api.amazon.com/auth/o2/token', {
       method: 'POST',
       headers: {
@@ -49,13 +49,16 @@ serve(async (req) => {
     });
 
     if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('SP-API token error:', errorText);
       throw new Error(`Token request failed: ${tokenResponse.status}`);
     }
 
     const tokenData: SPAPITokenResponse = await tokenResponse.json();
     const accessToken = tokenData.access_token;
 
-    // Get product details with enhanced parameters
+    // 1. Get real product catalog details
+    console.log('Fetching catalog data...');
     const catalogUrl = `https://sellingpartnerapi-na.amazon.com/catalog/2022-04-01/items/${asin}?marketplaceIds=${marketplaceId}&includedData=attributes,dimensions,identifiers,images,productTypes,relationships,salesRanks,summaries,variations`;
     
     const catalogResponse = await fetch(catalogUrl, {
@@ -69,9 +72,13 @@ serve(async (req) => {
     let productDetails = null;
     if (catalogResponse.ok) {
       productDetails = await catalogResponse.json();
+      console.log('Catalog data fetched successfully');
+    } else {
+      console.error('Catalog fetch failed:', catalogResponse.status, await catalogResponse.text());
     }
 
-    // Get competitive pricing with enhanced offer data
+    // 2. Get real competitive pricing and offers
+    console.log('Fetching pricing data...');
     const pricingUrl = `https://sellingpartnerapi-na.amazon.com/products/pricing/v0/items/${asin}/offers?MarketplaceId=${marketplaceId}&ItemCondition=New&CustomerType=Consumer`;
     
     const pricingResponse = await fetch(pricingUrl, {
@@ -85,60 +92,16 @@ serve(async (req) => {
     let pricingData = null;
     if (pricingResponse.ok) {
       pricingData = await pricingResponse.json();
+      console.log('Pricing data fetched successfully');
+    } else {
+      console.error('Pricing fetch failed:', pricingResponse.status, await pricingResponse.text());
     }
 
-    // Get seller eligibility and restrictions
-    const eligibilityUrl = `https://sellingpartnerapi-na.amazon.com/listings/2021-08-01/items/${asin}?marketplaceIds=${marketplaceId}&includedData=summaries,attributes,issues,offers,fulfillmentAvailability,procurement`;
-    
-    const eligibilityResponse = await fetch(eligibilityUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'x-amz-access-token': accessToken,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    let eligibilityData = null;
-    if (eligibilityResponse.ok) {
-      eligibilityData = await eligibilityResponse.json();
-    }
-
-    // Get inventory levels and fulfillment data
-    const inventoryUrl = `https://sellingpartnerapi-na.amazon.com/fba/inventory/v1/summaries?details=true&granularityType=Marketplace&marketplaceIds=${marketplaceId}`;
-    
-    const inventoryResponse = await fetch(inventoryUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'x-amz-access-token': accessToken,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    let inventoryData = null;
-    if (inventoryResponse.ok) {
-      inventoryData = await inventoryResponse.json();
-    }
-
-    // Get sales estimates and metrics
-    const salesUrl = `https://sellingpartnerapi-na.amazon.com/sales/v1/orderMetrics?marketplaceIds=${marketplaceId}&interval=2023-01-01T00:00:00--2024-01-01T00:00:00&granularity=Month&asin=${asin}`;
-    
-    const salesResponse = await fetch(salesUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'x-amz-access-token': accessToken,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    let salesData = null;
-    if (salesResponse.ok) {
-      salesData = await salesResponse.json();
-    }
-
-    // Enhanced fees estimate with multiple scenarios
+    // 3. Get real FBA fees estimate
+    console.log('Fetching fees estimate...');
     const feesUrl = `https://sellingpartnerapi-na.amazon.com/products/fees/v0/items/${asin}/feesEstimate`;
     
-    const basePrice = pricingData?.payload?.Summary?.LowestPrices?.[0]?.LandedPrice?.Amount || 29.99;
+    const basePrice = pricingData?.payload?.Summary?.BuyBoxPrices?.[0]?.LandedPrice?.Amount || 25.00;
     
     const feesPayload = {
       FeesEstimateRequest: {
@@ -165,9 +128,32 @@ serve(async (req) => {
     let feesData = null;
     if (feesResponse.ok) {
       feesData = await feesResponse.json();
+      console.log('Fees data fetched successfully');
+    } else {
+      console.error('Fees fetch failed:', feesResponse.status, await feesResponse.text());
     }
 
-    // Enhanced data processing
+    // 4. Get real seller eligibility
+    console.log('Fetching eligibility data...');
+    const eligibilityUrl = `https://sellingpartnerapi-na.amazon.com/listings/2021-08-01/items/${asin}?marketplaceIds=${marketplaceId}&includedData=summaries,attributes,issues,offers,fulfillmentAvailability,procurement`;
+    
+    const eligibilityResponse = await fetch(eligibilityUrl, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'x-amz-access-token': accessToken,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    let eligibilityData = null;
+    if (eligibilityResponse.ok) {
+      eligibilityData = await eligibilityResponse.json();
+      console.log('Eligibility data fetched successfully');
+    } else {
+      console.error('Eligibility fetch failed:', eligibilityResponse.status, await eligibilityResponse.text());
+    }
+
+    // Process real pricing data
     const processedPricingData = pricingData?.payload ? {
       buyBoxPrice: pricingData.payload.Summary?.BuyBoxPrices?.[0]?.LandedPrice?.Amount,
       lowestFBAPrice: pricingData.payload.Summary?.LowestPrices?.find(p => p.Fulfillment?.Type === 'Amazon')?.LandedPrice?.Amount,
@@ -184,36 +170,18 @@ serve(async (req) => {
       })) || []
     } : null;
 
-    const processedInventoryData = inventoryData?.payload ? {
-      totalQuantity: inventoryData.payload.inventorySummaries?.reduce((sum: number, item: any) => 
-        sum + (item.totalQuantity || 0), 0) || 0,
-      availableQuantity: inventoryData.payload.inventorySummaries?.reduce((sum: number, item: any) => 
-        sum + (item.sellableQuantity || 0), 0) || 0,
-      inboundQuantity: inventoryData.payload.inventorySummaries?.reduce((sum: number, item: any) => 
-        sum + (item.inboundWorkingQuantity || 0), 0) || 0,
-      fulfillmentCenters: inventoryData.payload.inventorySummaries?.length || 0
-    } : null;
-
-    const processedSalesData = salesData?.payload ? {
-      unitCount: salesData.payload.reduce((sum: number, period: any) => 
-        sum + (period.unitCount || 0), 0),
-      orderItemCount: salesData.payload.reduce((sum: number, period: any) => 
-        sum + (period.orderItemCount || 0), 0),
-      estimatedMonthlySales: Math.floor((salesData.payload.reduce((sum: number, period: any) => 
-        sum + (period.unitCount || 0), 0)) / 12)
-    } : null;
-
-    const processedEligibilityData = eligibilityData?.issues ? {
-      canSell: eligibilityData.issues.length === 0,
-      restrictions: eligibilityData.issues.map((issue: any) => ({
+    // Process real eligibility data
+    const processedEligibilityData = eligibilityData ? {
+      canSell: !eligibilityData.issues || eligibilityData.issues.length === 0,
+      restrictions: eligibilityData.issues?.map((issue: any) => ({
         code: issue.code,
         message: issue.message,
         severity: issue.severity
-      })),
-      requiresApproval: eligibilityData.issues.some((issue: any) => 
-        issue.code?.includes('APPROVAL') || issue.code?.includes('GATED')),
-      categoryGated: eligibilityData.issues.some((issue: any) => 
-        issue.code?.includes('CATEGORY'))
+      })) || [],
+      requiresApproval: eligibilityData.issues?.some((issue: any) => 
+        issue.code?.includes('APPROVAL') || issue.code?.includes('GATED')) || false,
+      categoryGated: eligibilityData.issues?.some((issue: any) => 
+        issue.code?.includes('CATEGORY')) || false
     } : {
       canSell: true,
       restrictions: [],
@@ -221,7 +189,7 @@ serve(async (req) => {
       categoryGated: false
     };
 
-    // Process the enhanced data
+    // Build real result
     const result = {
       success: true,
       data: {
@@ -242,32 +210,48 @@ serve(async (req) => {
           description: productDetails?.attributes?.item_description || null
         },
         pricing: processedPricingData,
-        inventory: processedInventoryData,
-        sales: processedSalesData,
         fees: feesData?.payload || null,
         eligibility: processedEligibilityData,
         
-        // Enhanced analytics
+        // Real competition analysis
         competitionAnalysis: {
           totalOffers: processedPricingData?.offerCount || 0,
           fbaOffers: processedPricingData?.offers?.filter(o => o.fulfillmentChannel === 'Amazon').length || 0,
           fbmOffers: processedPricingData?.offers?.filter(o => o.fulfillmentChannel === 'Merchant').length || 0,
           primeOffers: processedPricingData?.offers?.filter(o => o.isPrime).length || 0,
-          averageSellerRating: processedPricingData?.offers?.reduce((sum, o) => sum + o.sellerFeedbackRating, 0) / 
-                              Math.max(processedPricingData?.offers?.length || 1, 1) || 0
+          averageSellerRating: processedPricingData?.offers?.length > 0 ? 
+            processedPricingData.offers.reduce((sum, o) => sum + o.sellerFeedbackRating, 0) / processedPricingData.offers.length : 0
         },
         
+        // Real risk assessment
         riskAssessment: {
           categoryGated: processedEligibilityData.categoryGated,
           requiresApproval: processedEligibilityData.requiresApproval,
           restrictionCount: processedEligibilityData.restrictions.length,
           competitionLevel: (processedPricingData?.offerCount || 0) < 5 ? 'Low' : 
                            (processedPricingData?.offerCount || 0) < 15 ? 'Medium' : 'High'
+        },
+        
+        // API metadata
+        timestamp: new Date().toISOString(),
+        dataQuality: {
+          catalogData: !!productDetails,
+          pricingData: !!pricingData,
+          feesData: !!feesData,
+          eligibilityData: !!eligibilityData
         }
       }
     };
 
-    console.log('Enhanced SP-API data processed successfully');
+    console.log('Real SP-API data processed successfully:', {
+      title: result.data.productDetails?.title,
+      hasData: {
+        catalog: !!productDetails,
+        pricing: !!pricingData,
+        fees: !!feesData,
+        eligibility: !!eligibilityData
+      }
+    });
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -278,7 +262,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error.message 
+        error: error.message,
+        timestamp: new Date().toISOString()
       }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
