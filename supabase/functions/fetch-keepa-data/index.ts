@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -25,6 +24,18 @@ interface KeepaProduct {
   fbmNewPrice: number;
   offerCountHistory: number[];
   lastUpdate: number;
+  offers?: Array<{
+    sellerId: string;
+    isFBA: boolean;
+    isFBM: boolean;
+    isShippable: boolean;
+    condition: number;
+    conditionComment: string;
+    price: number;
+    shipping: number;
+    availability: number;
+    lastSeen: number;
+  }>;
   stats?: {
     sales30?: number;
     sales90?: number;
@@ -47,6 +58,25 @@ function getLastNonNullValue(arr: number[]): number | null {
     }
   }
   return null;
+}
+
+// Helper function to get lowest FBM price from current offers
+function getLowestFBMPrice(offers: any[]): number | null {
+  if (!offers || offers.length === 0) return null;
+  
+  // Filter for FBM offers that are new condition, shippable, and have valid price
+  const fbmOffers = offers.filter(offer => 
+    offer.isFBA === false &&
+    offer.isShippable === true &&
+    offer.condition === 1 && // new condition
+    offer.price > 0
+  );
+  
+  if (fbmOffers.length === 0) return null;
+  
+  // Sort by price and get the lowest
+  fbmOffers.sort((a, b) => a.price - b.price);
+  return fbmOffers[0].price;
 }
 
 serve(async (req) => {
@@ -114,16 +144,20 @@ serve(async (req) => {
     const lowestFBAPrice = getLastNonNullValue(fbaHistory);
     const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
     
-    // Fix FBM price extraction - use correct CSV index [2] for FBM prices
-    const fbmHistory = product.csv && product.csv[2] ? product.csv[2] : [];
-    const lowestFBMPrice = getLastNonNullValue(fbmHistory);
+    // Extract lowest FBM price from current offers (NOT from CSV history)
+    const lowestFBMPrice = getLowestFBMPrice(product.offers || []);
     const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
 
-    console.log('FBM Debug:', {
-      fbmHistoryLength: fbmHistory?.length,
-      fbmRawValues: fbmHistory?.slice(-10), // Last 10 values for debugging
-      extractedFBMPrice: lowestFBMPrice,
-      finalFBMPriceUSD: lowestFBMPriceUSD
+    console.log('FBM Offers Debug:', {
+      totalOffers: product.offers?.length || 0,
+      fbmOffersFound: product.offers?.filter(offer => 
+        offer.isFBA === false &&
+        offer.isShippable === true &&
+        offer.condition === 1 &&
+        offer.price > 0
+      ).length || 0,
+      lowestFBMPriceCents: lowestFBMPrice,
+      lowestFBMPriceUSD: lowestFBMPriceUSD
     });
 
     // Extract offer count from history
