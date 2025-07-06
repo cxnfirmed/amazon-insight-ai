@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +16,6 @@ import {
   Shield
 } from 'lucide-react';
 import { AmazonProduct } from '@/hooks/useAmazonProduct';
-import { PriceHistoryChart } from '@/components/PriceHistoryChart';
 import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
 import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
 
@@ -43,33 +43,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
     }
   };
 
-  // Generate mock price history data based on current product
-  const generatePriceHistory = () => {
-    if (!product.buy_box_price) return [];
-    
-    const data = [];
-    const basePrice = product.buy_box_price;
-    
-    for (let i = 90; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      
-      const priceVariation = (Math.random() - 0.5) * (basePrice * 0.1);
-      
-      data.push({
-        timestamp: date.toISOString(),
-        buyBoxPrice: Math.max(basePrice + priceVariation, basePrice * 0.8),
-        amazonPrice: product.amazon_in_stock ? basePrice + Math.random() * 2 : null,
-        newPrice: product.lowest_fba_price || (basePrice - Math.random() * 3),
-        salesRank: product.sales_rank || (Math.floor(Math.random() * 20000) + 10000),
-        amazonInStock: product.amazon_in_stock ? Math.random() > 0.1 ? 1 : 0 : 0
-      });
-    }
-    return data;
-  };
-
-  const priceHistoryData = generatePriceHistory();
-
   return (
     <div className="space-y-6">
       {/* Back button and header */}
@@ -88,6 +61,10 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               src={product.image_url || '/placeholder.svg'} 
               alt={product.title}
               className="w-32 h-32 rounded-lg object-cover flex-shrink-0"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=300&h=300&fit=crop';
+              }}
             />
             
             <div className="flex-1">
@@ -231,9 +208,9 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Enhanced Price History Chart */}
+          {/* Enhanced Price History Chart with real data */}
           <EnhancedPriceHistoryChart 
-            data={priceHistoryData}
+            product={product}
             title="Live Price & Sales History"
           />
           
@@ -264,11 +241,15 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
-                <span className="font-semibold text-green-600">${product.lowest_fba_price?.toFixed(2) || 'N/A'}</span>
+                <span className="font-semibold text-green-600">
+                  {product.lowest_fba_price ? `$${product.lowest_fba_price.toFixed(2)}` : 'N/A'}
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
-                <span className="font-semibold text-blue-600">${product.lowest_fbm_price?.toFixed(2) || 'N/A'}</span>
+                <span className="font-semibold text-blue-600">
+                  {product.lowest_fbm_price ? `$${product.lowest_fbm_price.toFixed(2)}` : 'N/A'}
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Offer Count:</span>
