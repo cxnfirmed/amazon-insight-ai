@@ -60,22 +60,18 @@ function getLastNonNullValue(arr: number[]): number | null {
   return null;
 }
 
-// Helper function to get lowest FBM price from current offers
+// Helper function to get lowest FBM price from current offers using Keepa's flag
 function getLowestFBMPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) return null;
   
-  // Filter for FBM offers with the updated logic
-  const fbmOffers = offers.filter(offer => 
-    offer.isFBA === false &&
-    offer.price > 0 &&
-    (offer.isShippable !== false || offer.isShippable === undefined)
-  );
+  // Find the offer marked as lowest NEW FBM shipping by Keepa
+  const lowestFBMOffer = offers.find(offer => offer.isLowest_NEW_FBM_SHIPPING === true);
   
-  if (fbmOffers.length === 0) return null;
+  if (!lowestFBMOffer || !lowestFBMOffer.price || lowestFBMOffer.price <= 0) {
+    return null;
+  }
   
-  // Sort by price and get the lowest
-  fbmOffers.sort((a, b) => a.price - b.price);
-  return fbmOffers[0].price;
+  return lowestFBMOffer.price;
 }
 
 serve(async (req) => {
@@ -143,17 +139,13 @@ serve(async (req) => {
     const lowestFBAPrice = getLastNonNullValue(fbaHistory);
     const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
     
-    // Extract lowest FBM price from current offers using updated logic
+    // Extract lowest FBM price using Keepa's isLowest_NEW_FBM_SHIPPING flag
     const lowestFBMPrice = getLowestFBMPrice(product.offers || []);
     const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
 
     console.log('FBM Offers Debug:', {
       totalOffers: product.offers?.length || 0,
-      fbmOffersFound: product.offers?.filter(offer => 
-        offer.isFBA === false &&
-        offer.price > 0 &&
-        (offer.isShippable !== false || offer.isShippable === undefined)
-      ).length || 0,
+      lowestFBMOfferFound: product.offers?.some(offer => offer.isLowest_NEW_FBM_SHIPPING === true) || false,
       lowestFBMPriceCents: lowestFBMPrice,
       lowestFBMPriceUSD: lowestFBMPriceUSD
     });
