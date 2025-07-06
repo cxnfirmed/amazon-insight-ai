@@ -121,11 +121,21 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
         </CardContent>
       </Card>
     );
-  }
+  };
 
   // Determine which price lines to show based on available data
   const hasValidData = (dataKey: keyof PriceHistoryData) => {
-    return filteredData.some(d => d[dataKey] !== null && d[dataKey] !== undefined && d[dataKey] > 0);
+    return filteredData.some(d => {
+      const value = d[dataKey];
+      // Handle different data types properly
+      if (typeof value === 'number') {
+        return value > 0;
+      }
+      if (typeof value === 'boolean') {
+        return value;
+      }
+      return value !== null && value !== undefined;
+    });
   };
 
   return (
