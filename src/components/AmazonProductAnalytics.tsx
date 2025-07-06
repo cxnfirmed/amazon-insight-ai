@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { 
   Star, 
   Package, 
@@ -13,7 +14,8 @@ import {
   CheckCircle,
   XCircle,
   Bug,
-  AlertTriangle
+  AlertTriangle,
+  Info
 } from 'lucide-react';
 import { AmazonProduct, useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
@@ -68,6 +70,13 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
     }
   };
 
+  const formatMonthlySales = () => {
+    if (product.estimated_monthly_sales === null || product.estimated_monthly_sales === undefined) {
+      return 'N/A';
+    }
+    return product.estimated_monthly_sales.toLocaleString();
+  };
+
   if (product.data_source === 'Error') {
     return (
       <div className="space-y-6">
@@ -103,231 +112,243 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header with debug toggle */}
-      <div className="flex items-center justify-between">
-        <Button onClick={onBack} variant="outline">
-          ← Back to Search
-        </Button>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Bug className="w-4 h-4" />
-            <span className="text-sm">Debug Mode</span>
-            <Switch checked={debugMode} onCheckedChange={setDebugMode} />
+    <TooltipProvider>
+      <div className="space-y-6">
+        {/* Header with debug toggle */}
+        <div className="flex items-center justify-between">
+          <Button onClick={onBack} variant="outline">
+            ← Back to Search
+          </Button>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Bug className="w-4 h-4" />
+              <span className="text-sm">Debug Mode</span>
+              <Switch checked={debugMode} onCheckedChange={setDebugMode} />
+            </div>
+            {getDataSourceBadge()}
+            <Badge variant="outline">ASIN: {product.asin}</Badge>
           </div>
-          {getDataSourceBadge()}
-          <Badge variant="outline">ASIN: {product.asin}</Badge>
         </div>
-      </div>
 
-      {/* Product Info Card */}
-      <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-        <CardContent className="p-6">
-          <div className="flex gap-6">
-            <img 
-              src={product.image_url || '/placeholder.svg'} 
-              alt={product.title}
-              className="w-32 h-32 rounded-lg object-cover flex-shrink-0"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = '/placeholder.svg';
-              }}
+        {/* Product Info Card */}
+        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+          <CardContent className="p-6">
+            <div className="flex gap-6">
+              <img 
+                src={product.image_url || '/placeholder.svg'} 
+                alt={product.title}
+                className="w-32 h-32 rounded-lg object-cover flex-shrink-0"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = '/placeholder.svg';
+                }}
+              />
+              
+              <div className="flex-1">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                  {product.title}
+                </h2>
+                
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {getStockStatusBadge()}
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Truck className="w-3 h-3" />
+                    {product.offer_count || 0} Offers
+                  </Badge>
+                  {product.manufacturer && <Badge variant="outline">{product.manufacturer}</Badge>}
+                  {product.category && <Badge variant="outline">{product.category}</Badge>}
+                </div>
+                
+                <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
+                  <p><strong>Manufacturer:</strong> {formatValue(product.manufacturer)}</p>
+                  <p><strong>Category:</strong> {formatValue(product.category)}</p>
+                  <p><strong>Sales Rank:</strong> {formatValue(product.sales_rank, 'number')}</p>
+                  <p><strong>Data Source:</strong> Real Keepa API</p>
+                  {product.last_updated && (
+                    <p><strong>Last Updated:</strong> {new Date(product.last_updated).toLocaleString()}</p>
+                  )}
+                </div>
+              </div>
+              
+              <div className="text-right">
+                <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                  {formatValue(product.buy_box_price, 'price')}
+                </div>
+                <div className="text-sm text-slate-600 dark:text-slate-400">
+                  Buy Box Price
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  From Keepa API
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Analytics Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-green-500" />
+                Monthly Sales (Est.)
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Info className="w-3 h-3 text-slate-400" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Based on Keepa's estimated total unit sales over the past 30 days (not Buy Box only).</p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">
+                {formatMonthlySales()}
+              </div>
+              <div className="text-xs text-slate-500">
+                {product.estimated_monthly_sales ? 'From Keepa stats' : 'Monthly sales unavailable'}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-purple-500" />
+                Sales Rank
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-purple-600">
+                {formatValue(product.sales_rank, 'number')}
+              </div>
+              <div className="text-xs text-slate-500">Keepa ranking</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Package className="w-4 h-4 text-blue-500" />
+                Live Offers
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-600">
+                {formatValue(product.offer_count, 'number')}
+              </div>
+              <div className="text-xs text-slate-500">From Keepa</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Shield className="w-4 h-4 text-orange-500" />
+                In Stock
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">
+                {product.in_stock ? 'Yes' : 'No'}
+              </div>
+              <div className="text-xs text-slate-500">Live status</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Two Column Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            {/* Keepa Price History Chart */}
+            <EnhancedPriceHistoryChart 
+              product={product}
+              title="Keepa Price & Sales History"
             />
             
-            <div className="flex-1">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-                {product.title}
-              </h2>
-              
-              <div className="flex flex-wrap gap-2 mb-3">
-                {getStockStatusBadge()}
-                <Badge variant="secondary" className="flex items-center gap-1">
-                  <Truck className="w-3 h-3" />
-                  {product.offer_count || 0} Offers
-                </Badge>
-                {product.manufacturer && <Badge variant="outline">{product.manufacturer}</Badge>}
-                {product.category && <Badge variant="outline">{product.category}</Badge>}
-              </div>
-              
-              <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
-                <p><strong>Manufacturer:</strong> {formatValue(product.manufacturer)}</p>
-                <p><strong>Category:</strong> {formatValue(product.category)}</p>
-                <p><strong>Sales Rank:</strong> {formatValue(product.sales_rank, 'number')}</p>
-                <p><strong>Data Source:</strong> Real Keepa API</p>
-                {product.last_updated && (
-                  <p><strong>Last Updated:</strong> {new Date(product.last_updated).toLocaleString()}</p>
-                )}
-              </div>
-            </div>
-            
-            <div className="text-right">
-              <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
-                {formatValue(product.buy_box_price, 'price')}
-              </div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">
-                Buy Box Price
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                From Keepa API
-              </div>
-            </div>
+            {/* Profitability Calculator */}
+            <ProfitabilityCalculator 
+              initialData={{
+                sellPrice: product.buy_box_price,
+                weight: 0.5,
+                dimensions: {
+                  length: 6,
+                  width: 4,
+                  height: 2
+                }
+              }}
+            />
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Analytics Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-green-500" />
-              Monthly Sales (Est.)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {formatValue(product.estimated_monthly_sales, 'number')}
-            </div>
-            <div className="text-xs text-slate-500">From Keepa data</div>
-          </CardContent>
-        </Card>
+          <div className="space-y-6">
+            {/* Keepa Pricing Analysis */}
+            <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle>Keepa Pricing</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 dark:text-slate-400">Buy Box Price:</span>
+                  <span className="font-semibold">{formatValue(product.buy_box_price, 'price')}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
+                  <span className="font-semibold text-green-600">
+                    {formatValue(product.lowest_fba_price, 'price')}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
+                  <span className="font-semibold text-purple-600">
+                    {formatValue(product.lowest_fbm_price, 'price')}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-purple-500" />
-              Sales Rank
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-purple-600">
-              {formatValue(product.sales_rank, 'number')}
-            </div>
-            <div className="text-xs text-slate-500">Keepa ranking</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Package className="w-4 h-4 text-blue-500" />
-              Live Offers
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">
-              {formatValue(product.offer_count, 'number')}
-            </div>
-            <div className="text-xs text-slate-500">From Keepa</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Shield className="w-4 h-4 text-orange-500" />
-              In Stock
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">
-              {product.in_stock ? 'Yes' : 'No'}
-            </div>
-            <div className="text-xs text-slate-500">Live status</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          {/* Keepa Price History Chart */}
-          <EnhancedPriceHistoryChart 
-            product={product}
-            title="Keepa Price & Sales History"
-          />
-          
-          {/* Profitability Calculator */}
-          <ProfitabilityCalculator 
-            initialData={{
-              sellPrice: product.buy_box_price,
-              weight: 0.5,
-              dimensions: {
-                length: 6,
-                width: 4,
-                height: 2
-              }
-            }}
-          />
+            {/* Quick Actions */}
+            <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-lg">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button className="w-full" variant="default">
+                  Add to Watchlist
+                </Button>
+                <Button className="w-full" variant="outline">
+                  Set Price Alert
+                </Button>
+                <Button className="w-full" variant="outline">
+                  Export Keepa Data
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
-        <div className="space-y-6">
-          {/* Keepa Pricing Analysis */}
-          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+        {/* Debug Panel */}
+        {debugMode && product.debug_data && (
+          <Card className="bg-gray-50 dark:bg-gray-900 border-gray-300">
             <CardHeader>
-              <CardTitle>Keepa Pricing</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Bug className="w-5 h-5" />
+                Debug Data - Raw Keepa API Response
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Buy Box Price:</span>
-                <span className="font-semibold">{formatValue(product.buy_box_price, 'price')}</span>
+            <CardContent>
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded">
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  <strong>Note:</strong> This shows the raw Keepa API response. All displayed data comes exclusively from Keepa.
+                </p>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
-                <span className="font-semibold text-green-600">
-                  {formatValue(product.lowest_fba_price, 'price')}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
-                <span className="font-semibold text-purple-600">
-                  {formatValue(product.lowest_fbm_price, 'price')}
-                </span>
-              </div>
+              <pre className="text-xs overflow-auto max-h-96 bg-white dark:bg-black p-4 rounded">
+                {JSON.stringify(product.debug_data, null, 2)}
+              </pre>
             </CardContent>
           </Card>
-
-          {/* Quick Actions */}
-          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-lg">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button className="w-full" variant="default">
-                Add to Watchlist
-              </Button>
-              <Button className="w-full" variant="outline">
-                Set Price Alert
-              </Button>
-              <Button className="w-full" variant="outline">
-                Export Keepa Data
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+        )}
       </div>
-
-      {/* Debug Panel */}
-      {debugMode && product.debug_data && (
-        <Card className="bg-gray-50 dark:bg-gray-900 border-gray-300">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bug className="w-5 h-5" />
-              Debug Data - Raw Keepa API Response
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded">
-              <p className="text-sm text-blue-800 dark:text-blue-200">
-                <strong>Note:</strong> This shows the raw Keepa API response. All displayed data comes exclusively from Keepa.
-              </p>
-            </div>
-            <pre className="text-xs overflow-auto max-h-96 bg-white dark:bg-black p-4 rounded">
-              {JSON.stringify(product.debug_data, null, 2)}
-            </pre>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+    </TooltipProvider>
   );
 };

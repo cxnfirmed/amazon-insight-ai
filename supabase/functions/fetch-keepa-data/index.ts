@@ -27,6 +27,11 @@ interface KeepaProduct {
   salesRankDrops: number[];
   offerCountHistory: number[];
   lastUpdate: number;
+  stats?: {
+    sales30?: number;
+    sales90?: number;
+    buyBoxShipped30?: number;
+  };
 }
 
 serve(async (req) => {
@@ -118,21 +123,24 @@ serve(async (req) => {
       return product.categoryTree[0].name;
     };
 
-    // Calculate monthly sales from dropsPerMonth or sales rank
+    // Calculate monthly sales using strict hierarchy
     const calculateMonthlySales = () => {
-      if (product.dropsPerMonth) {
-        return Math.floor(product.dropsPerMonth * 30);
+      // Primary: Use stats.sales30 as the monthly sales count
+      if (product.stats?.sales30 && product.stats.sales30 > 0) {
+        return product.stats.sales30;
       }
       
-      // Fallback: estimate from current sales rank
-      const currentSalesRank = product.salesRanks ? Object.values(product.salesRanks)[0]?.[0] : null;
-      if (currentSalesRank) {
-        if (currentSalesRank < 1000) return Math.floor(1000 / currentSalesRank * 500);
-        if (currentSalesRank < 10000) return Math.floor(10000 / currentSalesRank * 100);
-        if (currentSalesRank < 100000) return Math.floor(100000 / currentSalesRank * 20);
-        return Math.floor(1000000 / currentSalesRank * 5);
+      // Fallback 1: If stats.sales30 is null → use stats.sales90 / 3
+      if (product.stats?.sales90 && product.stats.sales90 > 0) {
+        return Math.floor(product.stats.sales90 / 3);
       }
       
+      // Fallback 2: If both are null → use stats.buyBoxShipped30
+      if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
+        return product.stats.buyBoxShipped30;
+      }
+      
+      // If all are null → return null (will display as "N/A")
       return null;
     };
 
@@ -196,7 +204,8 @@ serve(async (req) => {
       priceHistoryPoints: result.data.priceHistory.length,
       tokensLeft: result.data.tokensLeft,
       offerCount: result.data.offerCount,
-      inStock: result.data.inStock
+      inStock: result.data.inStock,
+      monthlySales: result.data.estimatedMonthlySales
     });
 
     return new Response(JSON.stringify(result), {
