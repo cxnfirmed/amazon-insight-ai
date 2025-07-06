@@ -62,12 +62,28 @@ function getLastNonNullValue(arr: number[]): number | null {
 
 // Helper function to get lowest FBM price using Keepa's NEW_FBM_SHIPPING logic
 function getLowestFBMPrice(offers: any[]): number | null {
-  if (!offers || offers.length === 0) return null;
+  if (!offers || offers.length === 0) {
+    console.log('FBM Debug: No offers array or empty offers');
+    return null;
+  }
+  
+  console.log('FBM Debug: Processing', offers.length, 'offers');
+  
+  // Log offer structure for debugging
+  if (offers.length > 0) {
+    console.log('FBM Debug: Sample offer structure:', {
+      keys: Object.keys(offers[0]),
+      firstOffer: offers[0]
+    });
+  }
   
   // First priority: Find the offer marked as lowest NEW FBM shipping by Keepa
   const lowestFBMOffer = offers.find(offer => offer.isLowest_NEW_FBM_SHIPPING === true);
   
+  console.log('FBM Debug: Found isLowest_NEW_FBM_SHIPPING offer:', !!lowestFBMOffer);
+  
   if (lowestFBMOffer && lowestFBMOffer.price && lowestFBMOffer.price > 0) {
+    console.log('FBM Debug: Using isLowest_NEW_FBM_SHIPPING price:', lowestFBMOffer.price / 100);
     return lowestFBMOffer.price / 100;
   }
   
@@ -76,7 +92,10 @@ function getLowestFBMPrice(offers: any[]): number | null {
     offer.isFBA === false && offer.isLowestOffer === true && offer.price > 0
   );
   
+  console.log('FBM Debug: Found FBM isLowestOffer:', !!lowestFBMGeneralOffer);
+  
   if (lowestFBMGeneralOffer) {
+    console.log('FBM Debug: Using FBM isLowestOffer price:', lowestFBMGeneralOffer.price / 100);
     return lowestFBMGeneralOffer.price / 100;
   }
   
@@ -85,10 +104,21 @@ function getLowestFBMPrice(offers: any[]): number | null {
     offer.isFBA === false && offer.price > 0
   );
   
-  if (fbmOffers.length === 0) return null;
+  console.log('FBM Debug: Found', fbmOffers.length, 'FBM offers with price > 0');
+  
+  if (fbmOffers.length === 0) {
+    // Log all offers to see what we have
+    console.log('FBM Debug: All offers isFBA status:', offers.map(offer => ({
+      isFBA: offer.isFBA,
+      price: offer.price,
+      condition: offer.condition
+    })));
+    return null;
+  }
   
   // Sort by price and get the lowest
   fbmOffers.sort((a, b) => a.price - b.price);
+  console.log('FBM Debug: Using fallback FBM price:', fbmOffers[0].price / 100);
   return fbmOffers[0].price / 100;
 }
 
