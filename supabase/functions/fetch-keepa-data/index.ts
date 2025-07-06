@@ -71,18 +71,25 @@ function getLowestFBMPrice(offers: any[]): number | null {
     return lowestFBMOffer.price / 100;
   }
   
-  // Fallback: Filter for FBM new condition offers and find the lowest price
-  const fbmNewOffers = offers.filter(offer => 
-    offer.isFBA === false &&
-    offer.condition === 1 &&
-    offer.price > 0
+  // Second priority: Find FBM offer marked as lowest offer by Keepa
+  const lowestFBMGeneralOffer = offers.find(offer => 
+    offer.isFBA === false && offer.isLowestOffer === true && offer.price > 0
   );
   
-  if (fbmNewOffers.length === 0) return null;
+  if (lowestFBMGeneralOffer) {
+    return lowestFBMGeneralOffer.price / 100;
+  }
+  
+  // Fallback: Filter for any FBM offers and find the lowest price
+  const fbmOffers = offers.filter(offer => 
+    offer.isFBA === false && offer.price > 0
+  );
+  
+  if (fbmOffers.length === 0) return null;
   
   // Sort by price and get the lowest
-  fbmNewOffers.sort((a, b) => a.price - b.price);
-  return fbmNewOffers[0].price / 100;
+  fbmOffers.sort((a, b) => a.price - b.price);
+  return fbmOffers[0].price / 100;
 }
 
 serve(async (req) => {
