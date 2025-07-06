@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -95,7 +96,7 @@ serve(async (req) => {
     const manufacturer = product.manufacturer || null;
     const category = product.categoryTree?.[0]?.name || 'Unknown';
     
-    // Extract image URL
+    // Extract image URL from imagesCSV
     let imageUrl = null;
     if (product.imagesCSV) {
       const images = product.imagesCSV.split(',');
@@ -104,22 +105,34 @@ serve(async (req) => {
       }
     }
 
-    // Extract pricing data - get last non-null values and convert from cents
-    const buyBoxPrice = getLastNonNullValue(product.buyBoxPriceHistory);
+    // Extract pricing data - get current values from history arrays and convert from cents
+    const buyBoxHistory = product.csv && product.csv[18] ? product.csv[18] : [];
+    const buyBoxPrice = getLastNonNullValue(buyBoxHistory);
     const buyBoxPriceUSD = buyBoxPrice ? buyBoxPrice / 100 : null;
     
-    const lowestFBAPrice = getLastNonNullValue([product.fbaNewPrice]);
+    const fbaHistory = product.csv && product.csv[1] ? product.csv[1] : [];
+    const lowestFBAPrice = getLastNonNullValue(fbaHistory);
     const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
     
-    const lowestFBMPrice = getLastNonNullValue([product.fbmNewPrice]);
+    const fbmHistory = product.csv && product.csv[2] ? product.csv[2] : [];
+    const lowestFBMPrice = getLastNonNullValue(fbmHistory);
     const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
 
-    // Extract offer data
-    const offerCount = getLastNonNullValue(product.offerCountHistory) || product.offerCount || 0;
+    // Extract offer count from history
+    const offerHistory = product.csv && product.csv[11] ? product.csv[11] : [];
+    const offerCount = getLastNonNullValue(offerHistory) || product.offerCount || 0;
     const inStock = offerCount > 0 || buyBoxPriceUSD !== null;
 
-    // Extract sales rank
-    const salesRank = product.salesRanks ? Object.values(product.salesRanks)[0]?.[0] : null;
+    // Extract sales rank from CSV or salesRanks object
+    let salesRank = null;
+    if (product.csv && product.csv[3]) {
+      salesRank = getLastNonNullValue(product.csv[3]);
+    } else if (product.salesRanks) {
+      const rankValues = Object.values(product.salesRanks);
+      if (rankValues.length > 0 && rankValues[0].length > 0) {
+        salesRank = rankValues[0][rankValues[0].length - 1];
+      }
+    }
 
     // Calculate estimated monthly sales using strict hierarchy
     let estimatedMonthlySales = null;
@@ -137,11 +150,11 @@ serve(async (req) => {
       // Keepa CSV indices: [0] = Amazon, [1] = New, [18] = Buy Box, [3] = Sales Rank, [11] = Offer Count
       const timestamps = product.csv[0] || [];
       const buyBoxPrices = product.csv[18] || [];
-      const amazonPrices = product.csv[0] || [];
-      const newPrices = product.csv[1] || [];
+      const amazonPrices = product.csv[1] || [];
       const salesRanks = product.csv[3] || [];
       const offerCounts = product.csv[11] || [];
 
+      // Process data in pairs (timestamp, value)
       for (let i = 0; i < timestamps.length; i += 2) {
         if (timestamps[i] && timestamps[i + 1] !== undefined) {
           const timestamp = keepaTimeToISO(timestamps[i]);
@@ -150,13 +163,13 @@ serve(async (req) => {
             timestamp,
             buyBoxPrice: buyBoxPrices[i + 1] && buyBoxPrices[i + 1] > 0 ? buyBoxPrices[i + 1] / 100 : null,
             amazonPrice: amazonPrices[i + 1] && amazonPrices[i + 1] > 0 ? amazonPrices[i + 1] / 100 : null,
-            newPrice: newPrices[i + 1] && newPrices[i + 1] > 0 ? newPrices[i + 1] / 100 : null,
+            newPrice: amazonPrices[i + 1] && amazonPrices[i + 1] > 0 ? amazonPrices[i + 1] / 100 : null,
             salesRank: salesRanks[i + 1] || null,
             offerCount: offerCounts[i + 1] || 0
           };
 
-          // Only add entries that have at least some data
-          if (historyEntry.buyBoxPrice || historyEntry.amazonPrice || historyEntry.newPrice || historyEntry.salesRank) {
+          // Only add entries that have at least some useful data
+          if (historyEntry.buyBoxPrice || historyEntry.amazonPrice || historyEntry.salesRank) {
             priceHistory.push(historyEntry);
           }
         }
@@ -196,15 +209,17 @@ serve(async (req) => {
       }
     };
 
-    console.log('Keepa data processed successfully:', {
+    console.log('Processed Keepa data:', {
       title: result.data.title,
       buyBoxPrice: result.data.buyBoxPrice,
       lowestFBAPrice: result.data.lowestFBAPrice,
+      lowestFBMPrice: result.data.lowestFBMPrice,
       priceHistoryPoints: result.data.priceHistory.length,
       tokensLeft: result.data.tokensLeft,
       offerCount: result.data.offerCount,
       inStock: result.data.inStock,
-      monthlySales: result.data.estimatedMonthlySales
+      monthlySales: result.data.estimatedMonthlySales,
+      salesRank: result.data.salesRank
     });
 
     return new Response(JSON.stringify(result), {

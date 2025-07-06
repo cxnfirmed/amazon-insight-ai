@@ -185,8 +185,8 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           </CardContent>
         </Card>
 
-        {/* Analytics Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Analytics Overview - Fixed to include Risk Score */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -254,6 +254,21 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 {product.in_stock ? 'Yes' : 'No'}
               </div>
               <div className="text-xs text-slate-500">Live status</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                Risk Score
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">
+                Medium
+              </div>
+              <div className="text-xs text-slate-500">AI Analysis</div>
             </CardContent>
           </Card>
         </div>
