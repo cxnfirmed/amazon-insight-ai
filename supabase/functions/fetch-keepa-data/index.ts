@@ -126,6 +126,7 @@ serve(async (req) => {
         asin: product.asin,
         title: product.title || 'Unknown Product',
         brand: product.brand || null,
+        categories: product.categories || [], // Include raw category data
         currentPrice: currentStats[0] ? currentStats[0] / 100 : null,
         buyBoxPrice: currentStats[18] ? currentStats[18] / 100 : null,
         amazonPrice: currentStats[0] ? currentStats[0] / 100 : null,

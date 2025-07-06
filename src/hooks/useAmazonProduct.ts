@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -44,6 +43,36 @@ export const useAmazonProduct = () => {
   const [product, setProduct] = useState<AmazonProduct | null>(null);
   const { toast } = useToast();
 
+  // Keepa category mapping - maps Keepa category IDs to human-readable names
+  const keepaCategoryMap: { [key: number]: string } = {
+    1: 'Books',
+    2: 'Movies & TV',
+    3: 'Music',
+    4: 'Video Games',
+    5: 'Electronics',
+    6: 'Camera & Photo',
+    7: 'Computers',
+    8: 'Cell Phones & Accessories',
+    9: 'Sports & Outdoors',
+    10: 'Home & Garden',
+    11: 'Tools & Home Improvement',
+    12: 'Automotive',
+    13: 'Health & Personal Care',
+    14: 'Beauty',
+    15: 'Grocery & Gourmet Food',
+    16: 'Pet Supplies',
+    17: 'Baby',
+    18: 'Clothing, Shoes & Jewelry',
+    19: 'Handmade',
+    20: 'Arts, Crafts & Sewing',
+    21: 'Industrial & Scientific',
+    22: 'Kitchen & Dining',
+    23: 'Office Products',
+    24: 'Patio, Lawn & Garden',
+    25: 'Toys & Games',
+    26: 'Everything Else'
+  };
+
   const fetchProduct = async (identifier: string, forceFresh: boolean = false) => {
     if (!identifier) return;
 
@@ -82,11 +111,19 @@ export const useAmazonProduct = () => {
           lowestFBMPrice = currentPrice * 0.95; // Rough estimate
         }
 
+        // Extract real category from Keepa data
+        let categoryName = 'Unknown Category';
+        if (keepaResponse.data.categories && keepaResponse.data.categories.length > 0) {
+          // Use the first category ID to get the category name
+          const categoryId = keepaResponse.data.categories[0];
+          categoryName = keepaCategoryMap[categoryId] || `Category ${categoryId}`;
+        }
+
         const combinedProduct: AmazonProduct = {
           asin: identifier,
           title: keepaResponse.data.title || 'Product Title Not Available',
-          brand: keepaResponse.data.brand || 'Unknown Brand',
-          category: 'Electronics', // Default to Electronics instead of General
+          brand: keepaResponse.data.brand || null,
+          category: categoryName,
           image_url: amazonImageUrl,
           current_price: currentPrice,
           buy_box_price: buyBoxPrice,
@@ -130,11 +167,19 @@ export const useAmazonProduct = () => {
         const productDetails = spApiData.data.productDetails;
         const pricing = spApiData.data.pricing;
         
+        // Extract real category from SP-API data
+        let categoryName = 'Unknown Category';
+        if (productDetails?.categories && productDetails.categories.length > 0) {
+          categoryName = productDetails.categories[0];
+        } else if (productDetails?.productTypes && productDetails.productTypes.length > 0) {
+          categoryName = productDetails.productTypes[0];
+        }
+        
         const combinedProduct: AmazonProduct = {
           asin: identifier,
           title: productDetails?.title || 'Product Title Not Available',
-          brand: productDetails?.brand || 'Unknown Brand',
-          category: productDetails?.category || 'Electronics',
+          brand: productDetails?.brand || null,
+          category: categoryName,
           image_url: productDetails?.image_url || `https://images-na.ssl-images-amazon.com/images/P/${identifier}.01.L.jpg`,
           dimensions: productDetails?.dimensions || 'Not specified',
           weight: productDetails?.weight || 'Not specified',
