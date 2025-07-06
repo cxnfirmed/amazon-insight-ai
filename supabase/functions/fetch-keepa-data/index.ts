@@ -64,12 +64,11 @@ function getLastNonNullValue(arr: number[]): number | null {
 function getLowestFBMPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) return null;
   
-  // Filter for FBM offers that are new condition, shippable, and have valid price
+  // Filter for FBM offers with the updated logic
   const fbmOffers = offers.filter(offer => 
     offer.isFBA === false &&
-    offer.isShippable === true &&
-    offer.condition === 1 && // new condition
-    offer.price > 0
+    offer.price > 0 &&
+    (offer.isShippable !== false || offer.isShippable === undefined)
   );
   
   if (fbmOffers.length === 0) return null;
@@ -144,7 +143,7 @@ serve(async (req) => {
     const lowestFBAPrice = getLastNonNullValue(fbaHistory);
     const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
     
-    // Extract lowest FBM price from current offers (NOT from CSV history)
+    // Extract lowest FBM price from current offers using updated logic
     const lowestFBMPrice = getLowestFBMPrice(product.offers || []);
     const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
 
@@ -152,9 +151,8 @@ serve(async (req) => {
       totalOffers: product.offers?.length || 0,
       fbmOffersFound: product.offers?.filter(offer => 
         offer.isFBA === false &&
-        offer.isShippable === true &&
-        offer.condition === 1 &&
-        offer.price > 0
+        offer.price > 0 &&
+        (offer.isShippable !== false || offer.isShippable === undefined)
       ).length || 0,
       lowestFBMPriceCents: lowestFBMPrice,
       lowestFBMPriceUSD: lowestFBMPriceUSD
