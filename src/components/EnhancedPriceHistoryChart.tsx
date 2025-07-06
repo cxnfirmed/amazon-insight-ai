@@ -9,11 +9,7 @@ interface PriceHistoryData {
   buyBoxPrice?: number;
   amazonPrice?: number;
   newPrice?: number;
-  usedPrice?: number;
-  newFBAPrice?: number;
-  newFBMPrice?: number;
   salesRank?: number;
-  amazonInStock?: boolean;
   offerCount?: number;
 }
 
@@ -26,31 +22,31 @@ interface EnhancedPriceHistoryChartProps {
 export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps> = ({ 
   data,
   product,
-  title = "Real Price & Sales History" 
+  title = "Keepa Price & Sales History" 
 }) => {
   const [timeRange, setTimeRange] = useState('90d');
   const [chartType, setChartType] = useState('price');
 
-  // Get real price history data from product
-  const getRealPriceHistoryData = (): PriceHistoryData[] => {
+  // Get price history data from Keepa
+  const getKeepaHistoryData = (): PriceHistoryData[] => {
     // Use provided data first
     if (data && data.length > 0) {
       console.log('Using provided price history data:', data.length, 'points');
       return data;
     }
     
-    // Use product's real price history from Keepa/SP-API
+    // Use product's Keepa price history
     if (product?.price_history && product.price_history.length > 0) {
-      console.log('Using product price history from', product.data_source, ':', product.price_history.length, 'points');
+      console.log('Using product price history from Keepa:', product.price_history.length, 'points');
       return product.price_history;
     }
     
-    console.log('No real price history data available');
+    console.log('No Keepa price history data available');
     return [];
   };
 
   const getFilteredData = () => {
-    const allData = getRealPriceHistoryData();
+    const allData = getKeepaHistoryData();
     if (!allData || allData.length === 0) return [];
     
     const now = new Date();
@@ -82,15 +78,15 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
   const chartTypes = [
     { value: 'price', label: 'Price History' },
     { value: 'rank', label: 'Sales Rank' },
-    { value: 'stock', label: 'Stock Status' }
+    { value: 'offers', label: 'Offer Count' }
   ];
 
   const getDataSourceBadge = () => {
     if (filteredData.length === 0) return null;
     
     return (
-      <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-        Real {product?.data_source || 'Historical'} Data
+      <span className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-1 rounded">
+        Real Keepa Data
       </span>
     );
   };
@@ -102,7 +98,7 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
           <CardTitle className="flex items-center justify-between">
             {title}
             <span className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 px-2 py-1 rounded">
-              No Real Data Available
+              No Data Found
             </span>
           </CardTitle>
         </CardHeader>
@@ -112,7 +108,7 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
               <p className="text-slate-600 dark:text-slate-400 mb-2">No historical price data available</p>
               <p className="text-sm text-slate-500 dark:text-slate-500">
                 {product?.data_source === 'Error' 
-                  ? 'API calls failed for this product'
+                  ? 'Keepa API calls failed for this product'
                   : 'This product may be new or have limited historical data'
                 }
               </p>
@@ -123,16 +119,12 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
     );
   };
 
-  // Determine which price lines to show based on available data
+  // Check which data types are available
   const hasValidData = (dataKey: keyof PriceHistoryData) => {
     return filteredData.some(d => {
       const value = d[dataKey];
-      // Handle different data types properly
       if (typeof value === 'number') {
         return value > 0;
-      }
-      if (typeof value === 'boolean') {
-        return value;
       }
       return value !== null && value !== undefined;
     });
@@ -237,30 +229,6 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
                     connectNulls={false}
                   />
                 )}
-                
-                {hasValidData('newFBAPrice') && (
-                  <Line 
-                    type="monotone" 
-                    dataKey="newFBAPrice" 
-                    stroke="#8B5CF6" 
-                    strokeWidth={1}
-                    name="New FBA Price"
-                    dot={false}
-                    connectNulls={false}
-                  />
-                )}
-                
-                {hasValidData('newFBMPrice') && (
-                  <Line 
-                    type="monotone" 
-                    dataKey="newFBMPrice" 
-                    stroke="#EF4444" 
-                    strokeWidth={1}
-                    name="New FBM Price"
-                    dot={false}
-                    connectNulls={false}
-                  />
-                )}
               </LineChart>
             ) : chartType === 'rank' ? (
               <AreaChart data={filteredData}>
@@ -297,18 +265,17 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
                 />
                 <YAxis 
                   tick={{ fontSize: 12 }}
-                  domain={[0, 1]}
-                  tickFormatter={(value) => value ? 'In Stock' : 'Out of Stock'}
+                  tickFormatter={(value) => `${value || 0} offers`}
                 />
                 <Tooltip 
                   labelFormatter={(value) => new Date(value).toLocaleDateString()}
-                  formatter={(value: any) => [value ? 'In Stock' : 'Out of Stock', 'Amazon Stock Status']}
+                  formatter={(value: any) => [`${value || 0}`, 'Offer Count']}
                 />
                 <Area 
-                  type="step" 
-                  dataKey="amazonInStock" 
-                  stroke="#10B981" 
-                  fill="#10B981" 
+                  type="monotone" 
+                  dataKey="offerCount" 
+                  stroke="#EF4444" 
+                  fill="#EF4444" 
                   fillOpacity={0.3}
                 />
               </AreaChart>
@@ -345,16 +312,16 @@ export const EnhancedPriceHistoryChart: React.FC<EnhancedPriceHistoryChartProps>
               <span className="text-slate-600 dark:text-slate-400">Sales Rank (Lower is Better)</span>
             </div>
           )}
-          {chartType === 'stock' && hasValidData('amazonInStock') && (
+          {chartType === 'offers' && hasValidData('offerCount') && (
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span className="text-slate-600 dark:text-slate-400">Amazon Stock Status</span>
+              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+              <span className="text-slate-600 dark:text-slate-400">Live Offer Count</span>
             </div>
           )}
         </div>
         
         <div className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} real data points from {product?.data_source || 'API'} | 
+          Showing {filteredData.length} data points from Keepa API | 
           Last updated: {product?.last_updated ? new Date(product.last_updated).toLocaleString() : 'Unknown'}
         </div>
       </CardContent>

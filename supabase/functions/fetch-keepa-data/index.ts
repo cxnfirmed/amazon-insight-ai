@@ -9,45 +9,24 @@ interface KeepaProduct {
   asin: string;
   domainId: number;
   title: string;
-  brand: string;
   manufacturer: string;
-  model: string;
-  color: string;
-  size: string;
-  categories: number[];
+  categoryTree: Array<{
+    catId: number;
+    name: string;
+  }>;
   imagesCSV: string;
   salesRanks: { [key: string]: number[] };
-  stats: {
-    current: number[];
-    avg: number[];
-    avg30: number[];
-    avg90: number[];
-    avg180: number[];
-  };
   csv: number[][];
-  offersSuccessful: boolean;
-  offerCSV: string;
-  variations: any[];
-  parent: string;
-  type: number;
-  hazardousMaterialType: number;
-  packageQuantity: number;
-  availabilityAmazon: number;
-  frequentlyBoughtTogether: string[];
-  features: string[];
-  description: string;
-  numberOfItems: number;
-  numberOfPages: number;
-  publicationDate: number;
-  releaseDate: number;
-  languages: any[];
+  offerCount: number;
+  buyBoxPrice: number;
+  fbaNewPrice: number;
+  fbmNewPrice: number;
+  dropsPerMonth: number;
+  buyBoxPriceHistory: number[];
+  fbaPriceHistory: number[];
+  salesRankDrops: number[];
+  offerCountHistory: number[];
   lastUpdate: number;
-  lastRatingUpdate: number;
-  lastPriceChange: number;
-  lastEbayUpdate: number;
-  ebayListingIds: string[];
-  couponCSV: string;
-  promotionCSV: string;
 }
 
 serve(async (req) => {
@@ -67,10 +46,10 @@ serve(async (req) => {
       throw new Error('Keepa API key not configured');
     }
 
-    console.log(`Fetching real Keepa data for ASIN: ${asin}`);
+    console.log(`Fetching Keepa data for ASIN: ${asin}`);
 
-    // Real Keepa API call with comprehensive parameters
-    const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${asin}&stats=1&offers=50&buybox=1&fbafees=1&variations=1&history=1&rating=1&reviews=1&update=1&days=365`;
+    // Call Keepa API with comprehensive parameters
+    const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${asin}&stats=1&offers=50&buybox=1&history=1&rating=1&update=1&days=365`;
     
     const response = await fetch(keepaUrl);
     if (!response.ok) {
@@ -92,19 +71,17 @@ serve(async (req) => {
 
     const product: KeepaProduct = data.products[0];
     
-    // Parse real historical price data from CSV format
-    const priceHistory = [];
-    if (product.csv && product.csv.length > 0) {
-      // Keepa CSV format: [0] = Amazon, [1] = New, [2] = Used, [3] = Sales Rank, [16] = New FBA, [17] = New FBM, [18] = Buy Box, etc.
+    // Parse historical price data from CSV format
+    const parseHistoryData = () => {
+      if (!product.csv || product.csv.length === 0) return [];
+      
+      const priceHistory = [];
+      // Keepa CSV indices: [0] = Amazon, [1] = New, [18] = Buy Box, [3] = Sales Rank, [11] = Offer Count
       const timestamps = product.csv[0] || [];
+      const buyBoxPrices = product.csv[18] || [];
       const amazonPrices = product.csv[0] || [];
       const newPrices = product.csv[1] || [];
-      const usedPrices = product.csv[2] || [];
       const salesRanks = product.csv[3] || [];
-      const newFBAPrices = product.csv[16] || [];
-      const newFBMPrices = product.csv[17] || [];
-      const buyBoxPrices = product.csv[18] || [];
-      const availabilityAmazon = product.csv[19] || [];
       const offerCounts = product.csv[11] || [];
 
       for (let i = 0; i < timestamps.length; i += 2) {
@@ -114,162 +91,112 @@ serve(async (req) => {
           
           priceHistory.push({
             timestamp: timestamp.toISOString(),
+            buyBoxPrice: buyBoxPrices[i + 1] && buyBoxPrices[i + 1] > 0 ? buyBoxPrices[i + 1] / 100 : null,
             amazonPrice: amazonPrices[i + 1] && amazonPrices[i + 1] > 0 ? amazonPrices[i + 1] / 100 : null,
             newPrice: newPrices[i + 1] && newPrices[i + 1] > 0 ? newPrices[i + 1] / 100 : null,
-            usedPrice: usedPrices[i + 1] && usedPrices[i + 1] > 0 ? usedPrices[i + 1] / 100 : null,
-            buyBoxPrice: buyBoxPrices[i + 1] && buyBoxPrices[i + 1] > 0 ? buyBoxPrices[i + 1] / 100 : null,
-            newFBAPrice: newFBAPrices[i + 1] && newFBAPrices[i + 1] > 0 ? newFBAPrices[i + 1] / 100 : null,
-            newFBMPrice: newFBMPrices[i + 1] && newFBMPrices[i + 1] > 0 ? newFBMPrices[i + 1] / 100 : null,
             salesRank: salesRanks[i + 1] || null,
-            amazonInStock: availabilityAmazon[i + 1] === 1,
             offerCount: offerCounts[i + 1] || 0
           });
         }
       }
-    }
-
-    // Extract current real stats
-    const currentStats = product.stats?.current || [];
-    const avgStats = product.stats?.avg || [];
-    const avg30Stats = product.stats?.avg30 || [];
-    const avg90Stats = product.stats?.avg90 || [];
-    const avg180Stats = product.stats?.avg180 || [];
-
-    // Real offer analysis from Keepa
-    let offerCount = 0;
-    let lowestFBAPrice = null;
-    let lowestFBMPrice = null;
-    let amazonSellerPresent = false;
-    let primeEligibleOffers = 0;
-    
-    if (product.offerCSV) {
-      const offers = product.offerCSV.split(',');
-      offerCount = Math.floor(offers.length / 2);
       
-      for (let i = 0; i < offers.length; i += 2) {
-        const price = parseInt(offers[i + 1]);
-        if (price > 0) {
-          const priceInDollars = price / 100;
-          
-          // Check if Amazon is seller
-          if (offers[i] && offers[i].includes('Amazon')) {
-            amazonSellerPresent = true;
-          }
-          
-          // Estimate FBA vs FBM based on offer patterns
-          const isFBA = i % 4 === 0; // Simple heuristic
-          
-          if (isFBA) {
-            if (!lowestFBAPrice || priceInDollars < lowestFBAPrice) {
-              lowestFBAPrice = priceInDollars;
-            }
-            primeEligibleOffers++;
-          } else {
-            if (!lowestFBMPrice || priceInDollars < lowestFBMPrice) {
-              lowestFBMPrice = priceInDollars;
-            }
-          }
-        }
-      }
-    }
+      return priceHistory.slice(-180); // Last 180 days
+    };
 
-    // Calculate real monthly sales estimate from sales rank
-    let estimatedMonthlySales = null;
-    if (currentStats[3]) {
-      const salesRank = currentStats[3];
-      const categoryMultiplier = product.categories?.[0] === 5 ? 2.5 : 1.5; // Electronics category gets higher multiplier
+    // Parse product image from imagesCSV
+    const getImageUrl = () => {
+      if (!product.imagesCSV) return null;
+      const images = product.imagesCSV.split(',');
+      if (images.length === 0) return null;
+      const firstImage = images[0].trim();
+      return `https://images-na.ssl-images-amazon.com/images/I/${firstImage}.jpg`;
+    };
+
+    // Parse category from categoryTree
+    const getCategoryName = () => {
+      if (!product.categoryTree || product.categoryTree.length === 0) return null;
+      return product.categoryTree[0].name;
+    };
+
+    // Calculate monthly sales from dropsPerMonth or sales rank
+    const calculateMonthlySales = () => {
+      if (product.dropsPerMonth) {
+        return Math.floor(product.dropsPerMonth * 30);
+      }
       
-      if (salesRank < 1000) {
-        estimatedMonthlySales = Math.floor((1000 / salesRank) * 500 * categoryMultiplier);
-      } else if (salesRank < 10000) {
-        estimatedMonthlySales = Math.floor((10000 / salesRank) * 100 * categoryMultiplier);
-      } else if (salesRank < 100000) {
-        estimatedMonthlySales = Math.floor((100000 / salesRank) * 20 * categoryMultiplier);
-      } else {
-        estimatedMonthlySales = Math.floor((1000000 / salesRank) * 5 * categoryMultiplier);
+      // Fallback: estimate from current sales rank
+      const currentSalesRank = product.salesRanks ? Object.values(product.salesRanks)[0]?.[0] : null;
+      if (currentSalesRank) {
+        if (currentSalesRank < 1000) return Math.floor(1000 / currentSalesRank * 500);
+        if (currentSalesRank < 10000) return Math.floor(10000 / currentSalesRank * 100);
+        if (currentSalesRank < 100000) return Math.floor(100000 / currentSalesRank * 20);
+        return Math.floor(1000000 / currentSalesRank * 5);
       }
-    }
+      
+      return null;
+    };
 
-    // Real competition analysis
-    const competitionLevel = offerCount < 5 ? 'Low' : 
-                           offerCount < 15 ? 'Medium' : 'High';
+    // Get current buy box price
+    const getCurrentBuyBoxPrice = () => {
+      if (product.buyBoxPrice && product.buyBoxPrice > 0) {
+        return product.buyBoxPrice / 100;
+      }
+      
+      // Try from history
+      if (product.buyBoxPriceHistory && product.buyBoxPriceHistory.length > 0) {
+        const latestPrice = product.buyBoxPriceHistory[product.buyBoxPriceHistory.length - 1];
+        return latestPrice && latestPrice > 0 ? latestPrice / 100 : null;
+      }
+      
+      return null;
+    };
 
-    // Real risk assessment
-    let amazonRiskScore = 1;
-    if (product.brand && product.brand.toLowerCase().includes('amazon')) amazonRiskScore += 2;
-    if (offerCount > 20) amazonRiskScore += 1;
-    if (currentStats[3] && currentStats[3] < 1000) amazonRiskScore += 1;
-    
+    // Determine stock status
+    const isInStock = () => {
+      const hasOffers = (product.offerCount || 0) > 0;
+      const hasBuyBox = getCurrentBuyBoxPrice() !== null;
+      return hasOffers || hasBuyBox;
+    };
+
     const result = {
       success: true,
       data: {
         asin: product.asin,
-        title: product.title || null,
-        brand: product.brand || null,
+        title: product.title || 'Product title not available',
         manufacturer: product.manufacturer || null,
-        model: product.model || null,
-        color: product.color || null,
-        size: product.size || null,
-        categories: product.categories || [],
-        imagesCSV: product.imagesCSV || null,
-        description: product.description || null,
-        packageQuantity: product.packageQuantity || 1,
-        hazardousMaterialType: product.hazardousMaterialType || 0,
+        category: getCategoryName(),
+        imageUrl: getImageUrl(),
         
-        // Real current pricing data from Keepa
-        currentPrice: currentStats[0] ? currentStats[0] / 100 : null,
-        buyBoxPrice: currentStats[18] ? currentStats[18] / 100 : null,
-        amazonPrice: currentStats[0] ? currentStats[0] / 100 : null,
-        lowestFBAPrice,
-        lowestFBMPrice,
+        // Current pricing from Keepa
+        buyBoxPrice: getCurrentBuyBoxPrice(),
+        lowestFBAPrice: product.fbaNewPrice && product.fbaNewPrice > 0 ? product.fbaNewPrice / 100 : null,
+        lowestFBMPrice: product.fbmNewPrice && product.fbmNewPrice > 0 ? product.fbmNewPrice / 100 : null,
         
-        // Real sales and ranking data
-        salesRank: currentStats[3] || null,
-        estimatedMonthlySales,
+        // Sales and inventory data
+        offerCount: product.offerCount || 0,
+        estimatedMonthlySales: calculateMonthlySales(),
+        inStock: isInStock(),
         
-        // Real inventory and availability
-        amazonInStock: product.availabilityAmazon === 1,
+        // Sales rank data
+        salesRank: product.salesRanks ? Object.values(product.salesRanks)[0]?.[0] : null,
         
-        // Real seller and competition data
-        offerCount,
-        amazonSellerPresent,
-        primeEligibleOffers,
-        competitionLevel,
+        // Historical data
+        priceHistory: parseHistoryData(),
         
-        // Real risk assessment
-        amazonRiskScore: Math.min(amazonRiskScore, 5),
-        ipRiskScore: product.brand ? 1 : 2,
-        
-        // Real historical data
-        priceHistory: priceHistory.slice(-180), // Last 180 days
-        
-        // Real average pricing data
-        avgPrice30: avg30Stats[0] ? avg30Stats[0] / 100 : null,
-        avgPrice90: avg90Stats[0] ? avg90Stats[0] / 100 : null,
-        avgPrice180: avg180Stats[0] ? avg180Stats[0] / 100 : null,
-        
-        // Real product details
-        features: product.features || [],
-        frequentlyBoughtTogether: product.frequentlyBoughtTogether || [],
-        variations: product.variations || [],
-        
-        // Real dates
-        releaseDate: product.releaseDate ? new Date(product.releaseDate * 60000).toISOString() : null,
-        lastPriceChange: product.lastPriceChange ? new Date((product.lastPriceChange + 21564000) * 60000).toISOString() : null,
-        lastUpdate: product.lastUpdate ? new Date((product.lastUpdate + 21564000) * 60000).toISOString() : null,
-        
-        // API metadata
+        // Metadata
         tokensUsed: data.tokensConsumed || 1,
         tokensLeft: data.tokensLeft || 0,
-        processingTime: data.processingTimeInMs || 0
+        processingTime: data.processingTimeInMs || 0,
+        lastUpdate: product.lastUpdate ? new Date((product.lastUpdate + 21564000) * 60000).toISOString() : null
       }
     };
 
-    console.log('Real Keepa data processed successfully:', {
+    console.log('Keepa data processed successfully:', {
       title: result.data.title,
       priceHistoryPoints: result.data.priceHistory.length,
       tokensLeft: result.data.tokensLeft,
-      offerCount: result.data.offerCount
+      offerCount: result.data.offerCount,
+      inStock: result.data.inStock
     });
 
     return new Response(JSON.stringify(result), {
