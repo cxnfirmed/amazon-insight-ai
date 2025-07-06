@@ -60,18 +60,29 @@ function getLastNonNullValue(arr: number[]): number | null {
   return null;
 }
 
-// Helper function to get lowest FBM price from current offers using Keepa's flag
+// Helper function to get lowest FBM price using Keepa's NEW_FBM_SHIPPING logic
 function getLowestFBMPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) return null;
   
-  // Find the offer marked as lowest NEW FBM shipping by Keepa
+  // First priority: Find the offer marked as lowest NEW FBM shipping by Keepa
   const lowestFBMOffer = offers.find(offer => offer.isLowest_NEW_FBM_SHIPPING === true);
   
-  if (!lowestFBMOffer || !lowestFBMOffer.price || lowestFBMOffer.price <= 0) {
-    return null;
+  if (lowestFBMOffer && lowestFBMOffer.price && lowestFBMOffer.price > 0) {
+    return lowestFBMOffer.price / 100;
   }
   
-  return lowestFBMOffer.price;
+  // Fallback: Filter for FBM new condition offers and find the lowest price
+  const fbmNewOffers = offers.filter(offer => 
+    offer.isFBA === false &&
+    offer.condition === 1 &&
+    offer.price > 0
+  );
+  
+  if (fbmNewOffers.length === 0) return null;
+  
+  // Sort by price and get the lowest
+  fbmNewOffers.sort((a, b) => a.price - b.price);
+  return fbmNewOffers[0].price / 100;
 }
 
 serve(async (req) => {
@@ -139,14 +150,15 @@ serve(async (req) => {
     const lowestFBAPrice = getLastNonNullValue(fbaHistory);
     const lowestFBAPriceUSD = lowestFBAPrice ? lowestFBAPrice / 100 : null;
     
-    // Extract lowest FBM price using Keepa's isLowest_NEW_FBM_SHIPPING flag
-    const lowestFBMPrice = getLowestFBMPrice(product.offers || []);
-    const lowestFBMPriceUSD = lowestFBMPrice ? lowestFBMPrice / 100 : null;
+    // Extract lowest FBM price using Keepa's NEW_FBM_SHIPPING logic with fallback
+    const lowestFBMPriceUSD = getLowestFBMPrice(product.offers || []);
 
     console.log('FBM Offers Debug:', {
       totalOffers: product.offers?.length || 0,
       lowestFBMOfferFound: product.offers?.some(offer => offer.isLowest_NEW_FBM_SHIPPING === true) || false,
-      lowestFBMPriceCents: lowestFBMPrice,
+      fbmNewOffersCount: product.offers?.filter(offer => 
+        offer.isFBA === false && offer.condition === 1 && offer.price > 0
+      ).length || 0,
       lowestFBMPriceUSD: lowestFBMPriceUSD
     });
 
