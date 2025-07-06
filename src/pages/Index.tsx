@@ -12,6 +12,7 @@ import { useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { BulkAnalysisTools } from '@/components/BulkAnalysisTools';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
+import { Button } from '@/components/ui/button';
 
 const Index = () => {
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
@@ -19,6 +20,19 @@ const Index = () => {
   const [activeView, setActiveView] = useState('Dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const { product, fetchProduct, loading } = useAmazonProduct();
+
+  const handleConnectAmazonAccount = () => {
+    // Generate a random state parameter for security
+    const state = Math.random().toString(36).substring(2, 15);
+    
+    // Store state in localStorage to verify on return
+    localStorage.setItem('amazon_oauth_state', state);
+    
+    // Redirect to Amazon's authorization URL
+    const authUrl = `https://sellercentral.amazon.com/apps/authorize/consent?application_id=amzn1.application-oa2-client.e932a0aad37c4b15ad63f2482ea3e3b5&state=${state}&redirect_uri=https://amazon-insight-ai.lovable.app/redirect`;
+    
+    window.location.href = authUrl;
+  };
 
   const handleSearch = async (query: string) => {
     console.log('Search initiated for:', query);
@@ -124,7 +138,20 @@ const Index = () => {
           </div>
         );
       default:
-        return <Dashboard onProductSelect={setSelectedProduct} searchQuery={searchQuery} />;
+        return (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Dashboard</h1>
+              <Button 
+                onClick={handleConnectAmazonAccount}
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                Connect Amazon Seller Account
+              </Button>
+            </div>
+            <Dashboard onProductSelect={setSelectedProduct} searchQuery={searchQuery} />
+          </div>
+        );
     }
   };
 
