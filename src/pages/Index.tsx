@@ -9,6 +9,9 @@ import { AIDecisionScore } from '@/components/AIDecisionScore';
 import { InventoryTracker } from '@/components/InventoryTracker';
 import { Alerts } from '@/components/Alerts';
 import { useAmazonProduct } from '@/hooks/useAmazonProduct';
+import { BulkAnalysisTools } from '@/components/BulkAnalysisTools';
+import { SettingsPanel } from '@/components/SettingsPanel';
+import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
 
 const Index = () => {
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
@@ -62,7 +65,7 @@ const Index = () => {
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-slate-600 dark:text-slate-400">Fetching fresh Amazon product data...</p>
+            <p className="text-slate-600 dark:text-slate-400">Fetching real Amazon product data...</p>
           </div>
         </div>
       );
@@ -77,7 +80,7 @@ const Index = () => {
               Unable to fetch product data for ASIN: {selectedProduct}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-              This could be due to Amazon blocking the request or the product not being available.
+              This could be due to API limits or the product not being available.
             </p>
             <button 
               onClick={() => {
@@ -95,13 +98,17 @@ const Index = () => {
 
     switch (activeView) {
       case 'FBA Calculator':
-        return <FBACalculator productId="" />;
+        return <ProfitabilityCalculator />;
       case 'AI Insights':
         return <AIDecisionScore productId="sample" detailed />;
       case 'Inventory Tracker':
         return <InventoryTracker />;
       case 'Alerts':
         return <Alerts />;
+      case 'Bulk Analysis':
+        return <BulkAnalysisTools />;
+      case 'Settings':
+        return <SettingsPanel />;
       case 'Automation':
         return (
           <div className="space-y-6">
@@ -114,13 +121,6 @@ const Index = () => {
           <div className="space-y-6">
             <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Reports</h1>
             <p className="text-slate-600 dark:text-slate-400">Reporting features coming soon.</p>
-          </div>
-        );
-      case 'Settings':
-        return (
-          <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Settings</h1>
-            <p className="text-slate-600 dark:text-slate-400">Settings panel coming soon.</p>
           </div>
         );
       default:
