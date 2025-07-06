@@ -94,13 +94,13 @@ export const BulkAnalysisTools: React.FC = () => {
           console.log(`Processing ${i + 1}/${identifiers.length}: ${identifier}`);
 
           // Determine if it's ASIN or UPC/EAN
-          let asin = identifier;
+          let currentAsin = identifier;
           const isASIN = /^[A-Z0-9]{10}$/.test(identifier);
           const isUPC = /^\d{12,14}$/.test(identifier);
 
           if (isUPC) {
             try {
-              asin = await convertUpcToAsin(identifier);
+              currentAsin = await convertUpcToAsin(identifier);
             } catch (error) {
               newResults.push({
                 identifier,
@@ -134,7 +134,7 @@ export const BulkAnalysisTools: React.FC = () => {
 
           // Fetch analytics for the ASIN
           await new Promise(resolve => {
-            fetchAnalytics(asin, {
+            fetchAnalytics(currentAsin, {
               productCost: 15,
               shippingCost: 2.50,
               prepCost: 0.50,
@@ -149,7 +149,7 @@ export const BulkAnalysisTools: React.FC = () => {
           // Simulate results (replace with actual data from analytics)
           newResults.push({
             identifier,
-            asin,
+            asin: currentAsin,
             title: `Product ${identifier}`,
             buyScore: Math.floor(Math.random() * 100),
             netProfit: Math.random() * 20 - 5,
@@ -166,7 +166,7 @@ export const BulkAnalysisTools: React.FC = () => {
           console.error(`Error processing ${identifier}:`, error);
           newResults.push({
             identifier,
-            asin: asin || identifier,
+            asin: currentAsin || identifier,
             title: '',
             buyScore: 0,
             netProfit: 0,
@@ -382,7 +382,9 @@ export const BulkAnalysisTools: React.FC = () => {
                         {result.status === 'success' ? (
                           <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />
                         ) : (
-                          <AlertCircle className="w-4 h-4 text-red-500 mx-auto" title={result.error} />
+                          <AlertCircle 
+                            className="w-4 h-4 text-red-500 mx-auto" 
+                          />
                         )}
                       </td>
                     </tr>
