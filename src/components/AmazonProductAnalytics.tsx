@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,15 +8,12 @@ import {
   Package, 
   Truck, 
   TrendingUp, 
-  TrendingDown,
-  AlertTriangle,
-  DollarSign,
   BarChart3,
-  Clock,
   Shield,
   CheckCircle,
   XCircle,
-  Bug
+  Bug,
+  AlertTriangle
 } from 'lucide-react';
 import { AmazonProduct, useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
@@ -51,16 +47,30 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
   };
 
   const getDataSourceBadge = () => {
-    switch (product.data_source) {
-      case 'SP-API':
-        return <Badge className="bg-blue-100 text-blue-800">Live SP-API Data</Badge>;
-      case 'Keepa':
-        return <Badge className="bg-green-100 text-green-800">Real Keepa Data</Badge>;
-      case 'Error':
-        return <Badge className="bg-red-100 text-red-800">Data Error</Badge>;
-      default:
-        return <Badge className="bg-gray-100 text-gray-800">Unknown Source</Badge>;
+    if (product.data_source === 'Keepa') {
+      return <Badge className="bg-green-100 text-green-800">Real Keepa Data</Badge>;
     }
+    return <Badge className="bg-red-100 text-red-800">Data Error</Badge>;
+  };
+
+  const getStockStatusBadge = () => {
+    // Only show "Out of Stock" if explicitly no offers and no buy box
+    if (product.offer_count === 0 && !product.buy_box_price) {
+      return (
+        <Badge variant="secondary" className="flex items-center gap-1 bg-red-100 text-red-800">
+          <XCircle className="w-3 h-3" />
+          Out of Stock
+        </Badge>
+      );
+    }
+    
+    // Show in stock if we have offers or buy box
+    return (
+      <Badge variant="secondary" className="flex items-center gap-1 bg-green-100 text-green-800">
+        <CheckCircle className="w-3 h-3" />
+        In Stock
+      </Badge>
+    );
   };
 
   const formatValue = (value: any, type: 'price' | 'number' | 'text' = 'text') => {
@@ -90,10 +100,10 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           <CardContent className="p-6 text-center">
             <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">
-              Unable to Fetch Product Data
+              Keepa API Failed
             </h2>
             <p className="text-red-600 dark:text-red-300 mb-4">
-              Both SP-API and Keepa failed to return data for ASIN: {product.asin}
+              Unable to fetch product data from Keepa for ASIN: {product.asin}
             </p>
             <p className="text-sm text-red-500 dark:text-red-400">
               This could be due to API limits, invalid ASIN, or network issues.
@@ -138,7 +148,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               className="w-32 h-32 rounded-lg object-cover flex-shrink-0"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=300&h=300&fit=crop';
+                target.src = '/placeholder.svg';
               }}
             />
             
@@ -162,13 +172,10 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               </div>
               
               <div className="flex flex-wrap gap-2 mb-3">
-                <Badge variant="secondary" className="flex items-center gap-1">
-                  <Package className="w-3 h-3" />
-                  {product.amazon_in_stock ? 'In Stock' : 'Out of Stock'}
-                </Badge>
+                {getStockStatusBadge()}
                 <Badge variant="secondary" className="flex items-center gap-1">
                   <Truck className="w-3 h-3" />
-                  {product.inventory_level || 'Stock level unknown'}
+                  {product.inventory_level || 'Stock level from Keepa'}
                 </Badge>
                 {product.brand && <Badge variant="outline">{product.brand}</Badge>}
                 {product.category && <Badge variant="outline">{product.category}</Badge>}
@@ -176,9 +183,10 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               
               <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
                 <p><strong>Brand:</strong> {formatValue(product.brand)}</p>
+                <p><strong>Manufacturer:</strong> {formatValue(product.manufacturer)}</p>
                 <p><strong>Category:</strong> {formatValue(product.category)}</p>
                 <p><strong>Sales Rank:</strong> {formatValue(product.sales_rank, 'number')}</p>
-                <p><strong>Data Source:</strong> {product.data_source}</p>
+                <p><strong>Data Source:</strong> Real Keepa API</p>
                 {product.last_updated && (
                   <p><strong>Last Updated:</strong> {new Date(product.last_updated).toLocaleString()}</p>
                 )}
@@ -190,31 +198,30 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 {formatValue(product.buy_box_price, 'price')}
               </div>
               <div className="text-sm text-slate-600 dark:text-slate-400">
-                Buy Box Price
+                Buy Box Price (Keepa)
               </div>
-              {product.buybox_seller && (
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Sold by {product.buybox_seller}
-                </div>
-              )}
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Amazon Seller: {product.amazon_seller_present ? 'Yes' : 'No'}
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Analytics Overview - Only show real data */}
+      {/* Analytics Overview - Real Keepa Data Only */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-green-500" />
-              Monthly Sales
+              Monthly Sales (Est.)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">
               {formatValue(product.estimated_monthly_sales, 'number')}
             </div>
+            <div className="text-xs text-slate-500">From Keepa rank</div>
           </CardContent>
         </Card>
 
@@ -229,6 +236,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
             <div className="text-2xl font-bold text-purple-600">
               {formatValue(product.sales_rank, 'number')}
             </div>
+            <div className="text-xs text-slate-500">Real Keepa data</div>
           </CardContent>
         </Card>
 
@@ -236,13 +244,14 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Package className="w-4 h-4 text-blue-500" />
-              Offer Count
+              Live Offers
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">
               {formatValue(product.offer_count, 'number')}
             </div>
+            <div className="text-xs text-slate-500">From Keepa API</div>
           </CardContent>
         </Card>
 
@@ -250,13 +259,14 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Truck className="w-4 h-4 text-orange-500" />
-              Prime Offers
+              Prime Eligible
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
               {formatValue(product.prime_eligible_offers, 'number')}
             </div>
+            <div className="text-xs text-slate-500">FBA offers</div>
           </CardContent>
         </Card>
 
@@ -271,6 +281,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
             <div className={`text-2xl font-bold ${getRiskColor(product.amazon_risk_score)}`}>
               {product.amazon_risk_score || 'N/A'}/5
             </div>
+            <div className="text-xs text-slate-500">Keepa analysis</div>
           </CardContent>
         </Card>
       </div>
@@ -278,17 +289,17 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Real Price History Chart */}
+          {/* Real Keepa Price History Chart */}
           <EnhancedPriceHistoryChart 
             product={product}
-            title="Real Price & Sales History"
+            title="Real Keepa Price & Sales History"
           />
           
           {/* Profitability Calculator */}
           <ProfitabilityCalculator 
             initialData={{
               sellPrice: product.buy_box_price,
-              weight: parseFloat(product.weight?.split(' ')[0] || '0.5'),
+              weight: 0.5, // Default since Keepa doesn't provide weight
               dimensions: {
                 length: 6,
                 width: 4,
@@ -299,15 +310,21 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
         </div>
 
         <div className="space-y-6">
-          {/* Real Pricing & Competition */}
+          {/* Real Keepa Pricing Analysis */}
           <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
             <CardHeader>
-              <CardTitle>Real Pricing Analysis</CardTitle>
+              <CardTitle>Real Keepa Pricing</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Buy Box Price:</span>
                 <span className="font-semibold">{formatValue(product.buy_box_price, 'price')}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 dark:text-slate-400">Current Amazon:</span>
+                <span className="font-semibold text-blue-600">
+                  {formatValue(product.current_price, 'price')}
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
@@ -317,25 +334,25 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
-                <span className="font-semibold text-blue-600">
+                <span className="font-semibold text-purple-600">
                   {formatValue(product.lowest_fbm_price, 'price')}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Total Offers:</span>
-                <span className="font-semibold">{formatValue(product.offer_count, 'number')}</span>
+                <span className="text-slate-600 dark:text-slate-400">30d Average:</span>
+                <span className="font-semibold">{formatValue(product.avg_price_30, 'price')}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">30d Avg:</span>
-                <span className="font-semibold">{formatValue(product.avg_price_30, 'price')}</span>
+                <span className="text-slate-600 dark:text-slate-400">90d Average:</span>
+                <span className="font-semibold">{formatValue(product.avg_price_90, 'price')}</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Real Risk Assessment */}
+          {/* Real Competition Analysis */}
           <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
             <CardHeader>
-              <CardTitle>Risk Assessment</CardTitle>
+              <CardTitle>Competition Analysis</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
@@ -345,33 +362,21 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 </Badge>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Amazon Risk:</span>
+                <span className="text-slate-600 dark:text-slate-400">Total Offers:</span>
+                <span className="font-semibold">{formatValue(product.offer_count, 'number')}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 dark:text-slate-400">Amazon Seller:</span>
+                <span className={`font-semibold ${product.amazon_seller_present ? 'text-red-600' : 'text-green-600'}`}>
+                  {product.amazon_seller_present ? '⚠️ Present' : '✓ Not Present'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 dark:text-slate-400">Risk Score:</span>
                 <span className={`font-semibold ${getRiskColor(product.amazon_risk_score)}`}>
                   {product.amazon_risk_score || 'N/A'}/5
                 </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">IP Risk:</span>
-                <span className={`font-semibold ${getRiskColor(product.ip_risk_score)}`}>
-                  {product.ip_risk_score || 'N/A'}/5
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Can Sell:</span>
-                <span className={`font-semibold ${product.seller_eligibility?.can_sell ? 'text-green-600' : 'text-red-600'}`}>
-                  {product.seller_eligibility?.can_sell ? '✓ Yes' : '✗ No'}
-                </span>
-              </div>
-              {product.seller_eligibility?.restrictions?.length > 0 && (
-                <div className="text-xs text-red-600">
-                  <strong>Restrictions:</strong>
-                  <ul className="list-disc list-inside mt-1">
-                    {product.seller_eligibility.restrictions.slice(0, 3).map((restriction, idx) => (
-                      <li key={idx}>{restriction}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </CardContent>
           </Card>
 
@@ -388,26 +393,28 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 Set Price Alert
               </Button>
               <Button className="w-full" variant="outline">
-                Export Analysis
-              </Button>
-              <Button className="w-full" variant="outline">
-                Share Report
+                Export Keepa Data
               </Button>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Debug Panel */}
+      {/* Debug Panel - Show Raw Keepa Response */}
       {debugMode && product.debug_data && (
         <Card className="bg-gray-50 dark:bg-gray-900 border-gray-300">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bug className="w-5 h-5" />
-              Debug Data - Raw API Response
+              Debug Data - Raw Keepa API Response
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                <strong>Note:</strong> This shows the raw Keepa API response. All displayed data comes exclusively from Keepa - no mock or placeholder values.
+              </p>
+            </div>
             <pre className="text-xs overflow-auto max-h-96 bg-white dark:bg-black p-4 rounded">
               {JSON.stringify(product.debug_data, null, 2)}
             </pre>
