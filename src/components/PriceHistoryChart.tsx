@@ -34,7 +34,7 @@ export const PriceHistoryChart: React.FC<PriceHistoryChartProps> = ({ product })
         lowestFBA: product.lowest_fba_price || (basePrice + Math.random() * 5),
         lowestFBM: product.lowest_fbm_price || (basePrice - Math.random() * 3),
         salesRank: product.sales_rank || (Math.floor(Math.random() * 20000) + 10000),
-        amazonInStock: product.amazon_in_stock ? 1 : 0
+        inStock: product.in_stock ? 1 : 0
       });
     }
     return data;

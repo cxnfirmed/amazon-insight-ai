@@ -30,22 +30,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
 }) => {
   const { debugMode, setDebugMode } = useAmazonProduct();
 
-  const getRiskColor = (score: number | null | undefined) => {
-    if (!score) return 'text-gray-600';
-    if (score <= 2) return 'text-green-600';
-    if (score <= 4) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const getCompetitionColor = (level: string | null | undefined) => {
-    switch (level?.toLowerCase()) {
-      case 'low': return 'bg-green-100 text-green-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'high': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
   const getDataSourceBadge = () => {
     if (product.data_source === 'Keepa') {
       return <Badge className="bg-green-100 text-green-800">Real Keepa Data</Badge>;
@@ -54,7 +38,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
   };
 
   const getStockStatusBadge = () => {
-    // Only show "Out of Stock" if explicitly no offers and no buy box
     if (!product.in_stock) {
       return (
         <Badge variant="secondary" className="flex items-center gap-1 bg-red-100 text-red-800">
@@ -156,20 +139,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 {product.title}
               </h2>
               
-              <div className="flex items-center gap-4 mb-3">
-                {product.rating && (
-                  <div className="flex items-center gap-1">
-                    <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                    <span className="font-medium text-slate-900 dark:text-white">
-                      {product.rating}
-                    </span>
-                    <span className="text-slate-600 dark:text-slate-400">
-                      ({formatValue(product.review_count, 'number')} reviews)
-                    </span>
-                  </div>
-                )}
-              </div>
-              
               <div className="flex flex-wrap gap-2 mb-3">
                 {getStockStatusBadge()}
                 <Badge variant="secondary" className="flex items-center gap-1">
@@ -207,7 +176,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
       </Card>
 
       {/* Analytics Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -256,30 +225,15 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
         <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Truck className="w-4 h-4 text-orange-500" />
-              Prime Eligible
+              <Shield className="w-4 h-4 text-orange-500" />
+              In Stock
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
-              {formatValue(product.prime_eligible_offers, 'number')}
+              {product.in_stock ? 'Yes' : 'No'}
             </div>
-            <div className="text-xs text-slate-500">FBA offers</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Shield className="w-4 h-4 text-red-500" />
-              Risk Score
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${getRiskColor(product.amazon_risk_score)}`}>
-              {product.amazon_risk_score || 'N/A'}/5
-            </div>
-            <div className="text-xs text-slate-500">Keepa analysis</div>
+            <div className="text-xs text-slate-500">Live status</div>
           </CardContent>
         </Card>
       </div>
@@ -319,12 +273,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 <span className="font-semibold">{formatValue(product.buy_box_price, 'price')}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Current Amazon:</span>
-                <span className="font-semibold text-blue-600">
-                  {formatValue(product.current_price, 'price')}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
                 <span className="font-semibold text-green-600">
                   {formatValue(product.lowest_fba_price, 'price')}
@@ -334,45 +282,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
                 <span className="font-semibold text-purple-600">
                   {formatValue(product.lowest_fbm_price, 'price')}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">30d Average:</span>
-                <span className="font-semibold">{formatValue(product.avg_price_30, 'price')}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">90d Average:</span>
-                <span className="font-semibold">{formatValue(product.avg_price_90, 'price')}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Real Competition Analysis */}
-          <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle>Competition Analysis</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Competition Level:</span>
-                <Badge className={getCompetitionColor(product.competition_level)}>
-                  {product.competition_level || 'Unknown'}
-                </Badge>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Total Offers:</span>
-                <span className="font-semibold">{formatValue(product.offer_count, 'number')}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Amazon Seller:</span>
-                <span className={`font-semibold ${product.amazon_seller_present ? 'text-red-600' : 'text-green-600'}`}>
-                  {product.amazon_seller_present ? '⚠️ Present' : '✓ Not Present'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600 dark:text-slate-400">Risk Score:</span>
-                <span className={`font-semibold ${getRiskColor(product.amazon_risk_score)}`}>
-                  {product.amazon_risk_score || 'N/A'}/5
                 </span>
               </div>
             </CardContent>

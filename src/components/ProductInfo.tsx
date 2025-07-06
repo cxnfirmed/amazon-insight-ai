@@ -2,7 +2,7 @@
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Star, Package, Truck, User, Store } from 'lucide-react';
+import { Package, CheckCircle, XCircle } from 'lucide-react';
 import { AmazonProduct } from '@/hooks/useAmazonProduct';
 
 interface ProductInfoProps {
@@ -10,39 +10,20 @@ interface ProductInfoProps {
 }
 
 export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
-  const getBuyboxSellerBadge = () => {
-    if (!product.buybox_seller) return null;
+  const getStockBadge = () => {
+    if (product.in_stock) {
+      return (
+        <Badge variant="secondary" className="flex items-center gap-1 bg-green-100 text-green-800">
+          <CheckCircle className="w-3 h-3" />
+          In Stock
+        </Badge>
+      );
+    }
     
-    const getSellerIcon = () => {
-      switch (product.buybox_seller_type) {
-        case 'Amazon':
-          return <Store className="w-3 h-3" />;
-        case 'FBA':
-          return <Truck className="w-3 h-3" />;
-        case 'FBM':
-          return <User className="w-3 h-3" />;
-        default:
-          return <User className="w-3 h-3" />;
-      }
-    };
-
-    const getSellerColor = () => {
-      switch (product.buybox_seller_type) {
-        case 'Amazon':
-          return 'bg-orange-100 text-orange-800 border-orange-200';
-        case 'FBA':
-          return 'bg-blue-100 text-blue-800 border-blue-200';
-        case 'FBM':
-          return 'bg-gray-100 text-gray-800 border-gray-200';
-        default:
-          return 'bg-gray-100 text-gray-800 border-gray-200';
-      }
-    };
-
     return (
-      <Badge className={`flex items-center gap-1 ${getSellerColor()}`}>
-        {getSellerIcon()}
-        {product.buybox_seller} ({product.buybox_seller_type})
+      <Badge variant="secondary" className="flex items-center gap-1 bg-red-100 text-red-800">
+        <XCircle className="w-3 h-3" />
+        Out of Stock
       </Badge>
     );
   };
@@ -63,34 +44,22 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                   {product.title}
                 </h2>
-                {product.rating && product.review_count && (
-                  <div className="flex items-center gap-4 mb-3">
-                    <div className="flex items-center gap-1">
-                      <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                      <span className="font-medium text-slate-900 dark:text-white">
-                        {product.rating}
-                      </span>
-                      <span className="text-slate-600 dark:text-slate-400">
-                        ({product.review_count.toLocaleString()} reviews)
-                      </span>
-                    </div>
-                  </div>
-                )}
                 
                 <div className="flex flex-wrap gap-2 mb-3">
+                  {getStockBadge()}
                   <Badge variant="secondary" className="flex items-center gap-1">
                     <Package className="w-3 h-3" />
-                    {product.amazon_in_stock ? 'In Stock' : 'Out of Stock'}
+                    {product.offer_count || 0} Offers
                   </Badge>
-                  {getBuyboxSellerBadge()}
-                  {product.brand && <Badge variant="outline">{product.brand}</Badge>}
+                  {product.manufacturer && <Badge variant="outline">{product.manufacturer}</Badge>}
                 </div>
                 
                 <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
                   {product.category && <p><strong>Category:</strong> {product.category}</p>}
-                  {product.dimensions && <p><strong>Dimensions:</strong> {product.dimensions}</p>}
-                  {product.weight && <p><strong>Weight:</strong> {product.weight}</p>}
                   {product.sales_rank && <p><strong>Sales Rank:</strong> #{product.sales_rank.toLocaleString()}</p>}
+                  {product.estimated_monthly_sales && (
+                    <p><strong>Est. Monthly Sales:</strong> {product.estimated_monthly_sales.toLocaleString()}</p>
+                  )}
                 </div>
               </div>
               
@@ -101,11 +70,9 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                 <div className="text-sm text-slate-600 dark:text-slate-400">
                   Current Buy Box Price
                 </div>
-                {product.buybox_seller && (
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Sold by {product.buybox_seller}
-                  </div>
-                )}
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  From Keepa API
+                </div>
               </div>
             </div>
           </div>
