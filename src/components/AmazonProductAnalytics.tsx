@@ -75,15 +75,17 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
       return 'N/A';
     }
     
-    // Format as "XK+" for thousands
+    // Format as "X+" for all values
     const salesValue = product.estimated_monthly_sales;
+    
+    // For values 1000 and above, format as "XK+"
     if (salesValue >= 1000) {
       const thousands = Math.floor(salesValue / 1000);
       return `${thousands}K+`;
     }
     
-    // For values under 1000, show the actual number
-    return salesValue.toString();
+    // For values under 1000, show as "X+"
+    return `${salesValue}+`;
   };
 
   if (product.data_source === 'Error') {
