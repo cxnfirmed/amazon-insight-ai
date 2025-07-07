@@ -74,7 +74,16 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
     if (product.estimated_monthly_sales === null || product.estimated_monthly_sales === undefined) {
       return 'N/A';
     }
-    return product.estimated_monthly_sales.toLocaleString();
+    
+    // Format as "XK+" for thousands
+    const salesValue = product.estimated_monthly_sales;
+    if (salesValue >= 1000) {
+      const thousands = Math.floor(salesValue / 1000);
+      return `${thousands}K+`;
+    }
+    
+    // For values under 1000, show the actual number
+    return salesValue.toString();
   };
 
   if (product.data_source === 'Error') {
