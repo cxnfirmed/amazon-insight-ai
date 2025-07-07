@@ -608,19 +608,82 @@ serve(async (req) => {
       }
     }
 
-    // Extract fee data from Keepa response
-    const fees = product.fees || {};
-    const feeData = {
-      pickAndPackFee: fees.pickAndPackFee ? fees.pickAndPackFee / 100 : fees.fbaFees?.pickAndPackFee ? fees.fbaFees.pickAndPackFee / 100 : null,
-      referralFee: fees.referralFee ? fees.referralFee / 100 : null,
-      storageFee: fees.storageFee ? fees.storageFee / 100 : null,
-      variableClosingFee: fees.variableClosingFee && fees.variableClosingFee > 0 ? fees.variableClosingFee / 100 : null
+    // Enhanced fee data extraction from Keepa response
+    console.log('Fee Debug - Raw Keepa product fees:', product.fees);
+    console.log('Fee Debug - Complete product object keys:', Object.keys(product));
+    
+    // Initialize fee data with defaults
+    let feeData = {
+      pickAndPackFee: null,
+      referralFee: null,
+      storageFee: null,
+      variableClosingFee: null
     };
 
-    console.log('Fee Debug:', {
-      rawFees: fees,
-      processedFees: feeData
-    });
+    // Extract fees from multiple possible locations in Keepa response
+    if (product.fees) {
+      console.log('Fee Debug - Processing product.fees:', product.fees);
+      
+      // Method 1: Direct fee properties
+      if (product.fees.pickAndPackFee && product.fees.pickAndPackFee > 0) {
+        feeData.pickAndPackFee = product.fees.pickAndPackFee / 100;
+      }
+      if (product.fees.referralFee && product.fees.referralFee > 0) {
+        feeData.referralFee = product.fees.referralFee / 100;
+      }
+      if (product.fees.storageFee && product.fees.storageFee > 0) {
+        feeData.storageFee = product.fees.storageFee / 100;
+      }
+      if (product.fees.variableClosingFee && product.fees.variableClosingFee > 0) {
+        feeData.variableClosingFee = product.fees.variableClosingFee / 100;
+      }
+      
+      // Method 2: Check nested fbaFees object
+      if (product.fees.fbaFees) {
+        console.log('Fee Debug - Processing nested fbaFees:', product.fees.fbaFees);
+        if (product.fees.fbaFees.pickAndPackFee && product.fees.fbaFees.pickAndPackFee > 0) {
+          feeData.pickAndPackFee = product.fees.fbaFees.pickAndPackFee / 100;
+        }
+        if (product.fees.fbaFees.weightHandlingFee && product.fees.fbaFees.weightHandlingFee > 0) {
+          // Use weight handling fee as FBA fee if pick and pack is not available
+          if (!feeData.pickAndPackFee) {
+            feeData.pickAndPackFee = product.fees.fbaFees.weightHandlingFee / 100;
+          }
+        }
+      }
+    }
+
+    // Alternative: Calculate estimated fees if Keepa doesn't provide them
+    if (!feeData.referralFee && buyBoxPriceUSD) {
+      // Estimate referral fee as 8% for Health & Household category (common rate)
+      const estimatedReferralFee = buyBoxPriceUSD * 0.08;
+      feeData.referralFee = Number(estimatedReferralFee.toFixed(2));
+      console.log('Fee Debug - Estimated referral fee (8%):', feeData.referralFee);
+    }
+
+    if (!feeData.pickAndPackFee && buyBoxPriceUSD) {
+      // Estimate FBA fee based on price range (simplified estimation)
+      let estimatedFBAFee = 0;
+      if (buyBoxPriceUSD <= 10) {
+        estimatedFBAFee = 2.50;
+      } else if (buyBoxPriceUSD <= 20) {
+        estimatedFBAFee = 3.50;
+      } else if (buyBoxPriceUSD <= 50) {
+        estimatedFBAFee = 4.50;
+      } else {
+        estimatedFBAFee = 6.50;
+      }
+      feeData.pickAndPackFee = estimatedFBAFee;
+      console.log('Fee Debug - Estimated FBA fee based on price:', feeData.pickAndPackFee);
+    }
+
+    if (!feeData.storageFee) {
+      // Estimate monthly storage fee (very rough estimate)
+      feeData.storageFee = 0.75; // $0.75 per month for standard size items
+      console.log('Fee Debug - Estimated storage fee per month:', feeData.storageFee);
+    }
+
+    console.log('Fee Debug - Final processed fees:', feeData);
 
     const result = {
       success: true,
@@ -637,7 +700,7 @@ serve(async (req) => {
         lowestFBMPrice: lowestFBMPriceUSD,
         amazonPrice: amazonPriceUSD,
         
-        // Fee data from Keepa
+        // Enhanced fee data with fallback estimates
         fees: feeData,
         
         // Sales and inventory data
