@@ -112,7 +112,7 @@ function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
   return mostRecentValidPrice;
 }
 
-// Helper function to check if an offer is currently active based on lastSeen timestamp
+// Helper function to check if an offer is currently active based on lastSeen timestamp - ENHANCED with stricter timing
 function isOfferCurrentlyActive(lastSeen: number): boolean {
   if (!lastSeen) return false;
   
@@ -121,8 +121,8 @@ function isOfferCurrentlyActive(lastSeen: number): boolean {
   const now = new Date();
   const hoursSinceLastSeen = (now.getTime() - lastSeenDate.getTime()) / (1000 * 60 * 60);
   
-  // Consider offer active if last seen within 24 hours
-  return hoursSinceLastSeen <= 24;
+  // Consider offer active if last seen within 6 hours (much more restrictive)
+  return hoursSinceLastSeen <= 6;
 }
 
 // Helper function to get latest price from offerCSV - scans backward for most recent price > 0
@@ -171,7 +171,7 @@ function getLowestFBAPrice(offers: any[]): number | null {
   return lowestPrice;
 }
 
-// Helper function to get lowest FBM price from current offers - ENHANCED VERSION with stricter filtering
+// Helper function to get lowest FBM price from current offers - ENHANCED VERSION with much stricter filtering
 function getLowestFBMPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) {
     console.log('FBM Debug: No offers array or empty offers');
@@ -180,7 +180,7 @@ function getLowestFBMPrice(offers: any[]): number | null {
   
   console.log('FBM Debug: Processing', offers.length, 'offers for FBM');
   
-  // Filter for FBM offers with stricter conditions
+  // Filter for FBM offers with much stricter conditions (6-hour window)
   const fbmOffers = offers.filter(offer => {
     const isValidFBM = offer.isFBA === false && 
                       offer.condition === 1 && 
@@ -193,15 +193,19 @@ function getLowestFBMPrice(offers: any[]): number | null {
       console.log('FBM Debug: Valid FBM offer found - Seller:', offer.sellerId, 
                   'LastSeen:', new Date((offer.lastSeen + 21564000) * 60 * 1000).toISOString(),
                   'OfferCSV length:', offer.offerCSV.length);
+    } else if (offer.isFBA === false && offer.condition === 1) {
+      console.log('FBM Debug: FBM offer rejected - Seller:', offer.sellerId, 
+                  'LastSeen:', offer.lastSeen ? new Date((offer.lastSeen + 21564000) * 60 * 1000).toISOString() : 'null',
+                  'Hours ago:', offer.lastSeen ? ((new Date().getTime() - (offer.lastSeen + 21564000) * 60 * 1000) / (1000 * 60 * 60)).toFixed(1) : 'N/A');
     }
     
     return isValidFBM;
   });
   
-  console.log('FBM Debug: Found', fbmOffers.length, 'valid active FBM offers');
+  console.log('FBM Debug: Found', fbmOffers.length, 'valid active FBM offers (6-hour window)');
   
   if (fbmOffers.length === 0) {
-    console.log('FBM Debug: No valid active FBM offers found');
+    console.log('FBM Debug: No valid active FBM offers found within 6 hours');
     return null;
   }
   
@@ -215,10 +219,10 @@ function getLowestFBMPrice(offers: any[]): number | null {
     };
   }).filter(offer => offer.currentPrice && offer.currentPrice > 0);
   
-  console.log('FBM Debug: Found', fbmOffersWithPrices.length, 'FBM offers with valid current prices');
+  console.log('FBM Debug: Found', fbmOffersWithPrices.length, 'FBM offers with valid current prices (6-hour window)');
   
   if (fbmOffersWithPrices.length === 0) {
-    console.log('FBM Debug: No FBM offers with valid current prices found');
+    console.log('FBM Debug: No FBM offers with valid current prices found within 6 hours');
     return null;
   }
   
@@ -226,11 +230,12 @@ function getLowestFBMPrice(offers: any[]): number | null {
   fbmOffersWithPrices.sort((a, b) => a.currentPrice - b.currentPrice);
   const lowestPrice = fbmOffersWithPrices[0].currentPrice / 100; // Convert from cents
   
-  console.log('FBM Debug: Final lowest FBM price:', lowestPrice.toFixed(2), 'from seller:', fbmOffersWithPrices[0].sellerId);
-  console.log('FBM Debug: All FBM prices found:', fbmOffersWithPrices.map(o => ({
+  console.log('FBM Debug: Final lowest FBM price (6-hour window):', lowestPrice.toFixed(2), 'from seller:', fbmOffersWithPrices[0].sellerId);
+  console.log('FBM Debug: All active FBM prices found (6-hour window):', fbmOffersWithPrices.map(o => ({
     seller: o.sellerId,
     price: (o.currentPrice / 100).toFixed(2),
-    lastSeen: new Date((o.lastSeen + 21564000) * 60 * 1000).toISOString()
+    lastSeen: new Date((o.lastSeen + 21564000) * 60 * 1000).toISOString(),
+    hoursAgo: ((new Date().getTime() - (o.lastSeen + 21564000) * 60 * 1000) / (1000 * 60 * 60)).toFixed(1)
   })));
   
   return Number(lowestPrice.toFixed(2));
