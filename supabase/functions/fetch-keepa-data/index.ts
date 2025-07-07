@@ -24,6 +24,7 @@ interface KeepaProduct {
   fbmNewPrice: number;
   offerCountHistory: number[];
   lastUpdate: number;
+  monthlySold?: number;
   offers?: Array<{
     sellerId: string;
     isFBA: boolean;
@@ -295,6 +296,12 @@ function extractMonthlySales(product: KeepaProduct): number | null {
   console.log('Sales Debug: CSV array length:', product.csv?.length);
   console.log('Sales Debug: Product ASIN:', product.asin);
   
+  // Priority 1: Check direct monthlySold field (this is what we found in the logs!)
+  if (product.monthlySold && product.monthlySold > 0) {
+    console.log('Sales Debug: Using direct monthlySold field:', product.monthlySold);
+    return product.monthlySold;
+  }
+  
   // Enhanced debugging for specific ASIN
   if (product.asin === 'B0CCK3L744') {
     console.log('Sales Debug: DETAILED ANALYSIS for B0CCK3L744');
@@ -314,7 +321,7 @@ function extractMonthlySales(product: KeepaProduct): number | null {
     console.log('Sales Debug: Complete stats object for B0CCK3L744:', JSON.stringify(product.stats, null, 2));
   }
   
-  // Priority 1: Check multiple CSV indices that might contain "Bought in past month" data
+  // Priority 2: Check multiple CSV indices that might contain "Bought in past month" data
   // Based on Keepa documentation, monthly sales could be in various indices
   const potentialSalesIndices = [19, 16, 17, 18, 20, 21, 22, 23, 10, 11, 12, 13, 14, 15]; // Extended list
   
@@ -373,26 +380,26 @@ function extractMonthlySales(product: KeepaProduct): number | null {
     }
   }
   
-  // Priority 2: Direct sales30 from stats (if available)
+  // Priority 3: Direct sales30 from stats (if available)
   if (product.stats?.sales30 && product.stats.sales30 > 0) {
     console.log('Sales Debug: Using stats.sales30:', product.stats.sales30);
     return product.stats.sales30;
   }
   
-  // Priority 3: Calculate from sales90 (divide by 3 for monthly average)
+  // Priority 4: Calculate from sales90 (divide by 3 for monthly average)
   if (product.stats?.sales90 && product.stats.sales90 > 0) {
     const monthlySales = Math.round(product.stats.sales90 / 3);
     console.log('Sales Debug: Using stats.sales90 / 3:', monthlySales, '(original:', product.stats.sales90, ')');
     return monthlySales;
   }
   
-  // Priority 4: Use buyBoxShipped30 as estimate
+  // Priority 5: Use buyBoxShipped30 as estimate
   if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
     console.log('Sales Debug: Using stats.buyBoxShipped30:', product.stats.buyBoxShipped30);
     return product.stats.buyBoxShipped30;
   }
   
-  // Priority 5: Try sales rank drops as last resort
+  // Priority 6: Try sales rank drops as last resort
   if (product.stats?.salesRankDrops30 && product.stats.salesRankDrops30 > 0) {
     // Sales rank drops can be a rough indicator of sales activity
     const estimatedSales = Math.min(product.stats.salesRankDrops30 * 2, 5000); // More conservative estimate
