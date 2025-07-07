@@ -88,6 +88,19 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
     return `${salesValue}+`;
   };
 
+  const getAmazonPrice = () => {
+    // Check if Amazon (ATVPDKIKX0DER) is selling this product
+    // This would come from Keepa's offer data or price history
+    // For now, we'll check if there's Amazon price data available
+    if (product.debug_data?.amazonPrice || product.debug_data?.amazon_price) {
+      const amazonPrice = product.debug_data.amazonPrice || product.debug_data.amazon_price;
+      return typeof amazonPrice === 'number' ? `$${amazonPrice.toFixed(2)}` : 'None';
+    }
+    
+    // If no specific Amazon price data, return None
+    return 'None';
+  };
+
   if (product.data_source === 'Error') {
     return (
       <div className="space-y-6">
@@ -328,6 +341,12 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                   <span className="text-slate-600 dark:text-slate-400">Lowest FBM:</span>
                   <span className="font-semibold text-purple-600">
                     {formatValue(product.lowest_fbm_price, 'price')}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 dark:text-slate-400">AMZ:</span>
+                  <span className="font-semibold text-orange-600">
+                    {getAmazonPrice()}
                   </span>
                 </div>
               </CardContent>
