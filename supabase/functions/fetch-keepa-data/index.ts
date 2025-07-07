@@ -137,6 +137,14 @@ function getLowestFBMPrice(offers: any[]): number | null {
   }
   
   console.log('FBM Debug: Processing', offers.length, 'offers for FBM');
+  console.log('FBM Debug: Raw offers data:', JSON.stringify(offers.map(o => ({
+    isFBA: o.isFBA,
+    condition: o.condition,
+    hasOfferCSV: !!o.offerCSV,
+    offerCSVLength: o.offerCSV?.length || 0,
+    lastSeen: o.lastSeen,
+    sellerId: o.sellerId
+  })), null, 2));
   
   // Filter offers where: isFBA === false, condition === 1, offerCSV exists, lastSeen exists
   const filteredOffers = offers.filter(offer => 
@@ -155,12 +163,21 @@ function getLowestFBMPrice(offers: any[]): number | null {
   }
   
   // Extract latest price for each offer using getLatestPriceFromOfferCSV
-  const fbmOffersWithPrices = filteredOffers.map(offer => ({
-    ...offer,
-    latestPrice: getLatestPriceFromOfferCSV(offer.offerCSV)
-  })).filter(offer => offer.latestPrice && offer.latestPrice > 0);
+  const fbmOffersWithPrices = filteredOffers.map(offer => {
+    const latestPrice = getLatestPriceFromOfferCSV(offer.offerCSV);
+    console.log('FBM Debug: Offer', offer.sellerId, 'lastSeen:', offer.lastSeen, 'latestPrice:', latestPrice, 'offerCSV sample:', offer.offerCSV.slice(-6));
+    return {
+      ...offer,
+      latestPrice: latestPrice
+    };
+  }).filter(offer => offer.latestPrice && offer.latestPrice > 0);
   
   console.log('FBM Debug: Found', fbmOffersWithPrices.length, 'FBM offers with valid prices');
+  console.log('FBM Debug: Price breakdown:', fbmOffersWithPrices.map(o => ({
+    sellerId: o.sellerId,
+    price: o.latestPrice / 100,
+    lastSeen: o.lastSeen
+  })));
   
   if (fbmOffersWithPrices.length === 0) {
     console.log('FBM Debug: No FBM offers with valid prices found');
