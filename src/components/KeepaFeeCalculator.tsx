@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -44,16 +45,34 @@ export const KeepaFeeCalculator: React.FC<KeepaFeeCalculatorProps> = ({ product 
     const { costPrice, salePrice, storageMonths } = inputs;
     const fees = product.fees;
 
+    console.log('Fee Calculation Debug:', {
+      productASIN: product.asin,
+      rawFees: fees,
+      hasFeesObject: !!fees,
+      feesKeys: fees ? Object.keys(fees) : 'No fees object'
+    });
+
     if (!fees) {
       console.log('No fee data available from Keepa');
       return;
     }
 
-    // Extract fees from Keepa data
+    // Extract fees with better null checking and debugging
     const fbaFee = fees.pickAndPackFee || 0;
     const referralFee = fees.referralFee || 0;
     const storageFeePerMonth = fees.storageFee || 0;
     const variableClosingFee = fees.variableClosingFee && fees.variableClosingFee > 0 ? fees.variableClosingFee : 0;
+
+    console.log('Individual Fee Debug:', {
+      pickAndPackFee: fees.pickAndPackFee,
+      referralFee: fees.referralFee,
+      storageFee: fees.storageFee,
+      variableClosingFee: fees.variableClosingFee,
+      processedFBAFee: fbaFee,
+      processedReferralFee: referralFee,
+      processedStorageFeePerMonth: storageFeePerMonth,
+      processedVariableClosingFee: variableClosingFee
+    });
 
     // Calculate total storage fee
     const totalStorageFee = storageFeePerMonth * storageMonths;
@@ -65,6 +84,17 @@ export const KeepaFeeCalculator: React.FC<KeepaFeeCalculatorProps> = ({ product 
     const profitMargin = salePrice > 0 ? (profit / salePrice) * 100 : 0;
     const breakevenSalePrice = costPrice + totalFees;
     const estimatedPayout = salePrice - totalFees;
+
+    console.log('Calculation Results Debug:', {
+      fbaFee,
+      referralFee,
+      totalStorageFee,
+      variableClosingFee,
+      totalFees,
+      profit,
+      roi,
+      profitMargin
+    });
 
     setResults({
       fbaFee: Number(fbaFee.toFixed(2)),
@@ -256,6 +286,12 @@ export const KeepaFeeCalculator: React.FC<KeepaFeeCalculatorProps> = ({ product 
           </CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              <strong>Debug Info:</strong> FBA Fee: ${results.fbaFee} | Referral Fee: ${results.referralFee} | Storage Fee: ${results.storageFee}
+            </p>
+          </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div className="space-y-2">
               <div className="flex justify-between">
