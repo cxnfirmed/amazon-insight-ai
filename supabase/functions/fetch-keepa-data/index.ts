@@ -60,22 +60,6 @@ function getLastNonNullValue(arr: number[]): number | null {
   return null;
 }
 
-// Helper function to get latest price from offerCSV - scans backward for most recent price > 0
-function getLatestPriceFromOfferCSV(offerCSV: number[]): number | null {
-  if (!offerCSV || offerCSV.length === 0) return null;
-  
-  // offerCSV contains [timestamp, price, shipping, timestamp, price, shipping, ...]
-  // Scan backwards through the array in groups of 3 (timestamp, price, shipping)
-  for (let i = offerCSV.length - 2; i >= 1; i -= 3) {
-    if (offerCSV[i] && offerCSV[i] > 0) {
-      console.log('Latest Price Debug: Found price at index', i, ':', offerCSV[i]);
-      return offerCSV[i];
-    }
-  }
-  
-  return null;
-}
-
 // Helper function to get current price from offerCSV - get the most recent valid price
 function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
   if (!offerCSV || offerCSV.length === 0) return null;
@@ -94,6 +78,35 @@ function getCurrentPriceFromOfferCSV(offerCSV: number[]): number | null {
   if (offerCSV.length >= 2 && offerCSV[1] && offerCSV[1] > 0) {
     console.log('Price Debug: Using first price entry:', offerCSV[1]);
     return offerCSV[1];
+  }
+  
+  return null;
+}
+
+// Helper function to check if an offer is currently active based on lastSeen timestamp
+function isOfferCurrentlyActive(lastSeen: number): boolean {
+  if (!lastSeen) return false;
+  
+  // Convert Keepa timestamp to Date
+  const lastSeenDate = new Date((lastSeen + 21564000) * 60 * 1000);
+  const now = new Date();
+  const hoursSinceLastSeen = (now.getTime() - lastSeenDate.getTime()) / (1000 * 60 * 60);
+  
+  // Consider offer active if last seen within 24 hours
+  return hoursSinceLastSeen <= 24;
+}
+
+// Helper function to get latest price from offerCSV - scans backward for most recent price > 0
+function getLatestPriceFromOfferCSV(offerCSV: number[]): number | null {
+  if (!offerCSV || offerCSV.length === 0) return null;
+  
+  // offerCSV contains [timestamp, price, shipping, timestamp, price, shipping, ...]
+  // Scan backwards through the array in groups of 3 (timestamp, price, shipping)
+  for (let i = offerCSV.length - 2; i >= 1; i -= 3) {
+    if (offerCSV[i] && offerCSV[i] > 0) {
+      console.log('Latest Price Debug: Found price at index', i, ':', offerCSV[i]);
+      return offerCSV[i];
+    }
   }
   
   return null;
@@ -143,51 +156,54 @@ function getLowestFBMPrice(offers: any[]): number | null {
     hasOfferCSV: !!o.offerCSV,
     offerCSVLength: o.offerCSV?.length || 0,
     lastSeen: o.lastSeen,
-    sellerId: o.sellerId
+    sellerId: o.sellerId,
+    isActive: isOfferCurrentlyActive(o.lastSeen)
   })), null, 2));
   
-  // Filter offers where: isFBA === false, condition === 1, offerCSV exists, lastSeen exists
+  // Filter offers where: isFBA === false, condition === 1, offerCSV exists, lastSeen exists, and offer is currently active
   const filteredOffers = offers.filter(offer => 
     offer.isFBA === false && 
     offer.condition === 1 && 
     offer.offerCSV && 
     offer.offerCSV.length > 0 &&
-    offer.lastSeen
+    offer.lastSeen &&
+    isOfferCurrentlyActive(offer.lastSeen)
   );
   
-  console.log('FBM Debug: Found', filteredOffers.length, 'filtered FBM offers');
+  console.log('FBM Debug: Found', filteredOffers.length, 'filtered active FBM offers');
   
   if (filteredOffers.length === 0) {
-    console.log('FBM Debug: No valid FBM offers found after filtering');
+    console.log('FBM Debug: No valid active FBM offers found after filtering');
     return null;
   }
   
-  // Extract latest price for each offer using getLatestPriceFromOfferCSV
+  // Extract current price for each offer using getCurrentPriceFromOfferCSV
   const fbmOffersWithPrices = filteredOffers.map(offer => {
-    const latestPrice = getLatestPriceFromOfferCSV(offer.offerCSV);
-    console.log('FBM Debug: Offer', offer.sellerId, 'lastSeen:', offer.lastSeen, 'latestPrice:', latestPrice, 'offerCSV sample:', offer.offerCSV.slice(-6));
+    const currentPrice = getCurrentPriceFromOfferCSV(offer.offerCSV);
+    const lastSeenDate = new Date((offer.lastSeen + 21564000) * 60 * 1000);
+    console.log('FBM Debug: Offer', offer.sellerId, 'lastSeen:', lastSeenDate.toISOString(), 'currentPrice:', currentPrice, 'offerCSV sample:', offer.offerCSV.slice(-6));
     return {
       ...offer,
-      latestPrice: latestPrice
+      currentPrice: currentPrice
     };
-  }).filter(offer => offer.latestPrice && offer.latestPrice > 0);
+  }).filter(offer => offer.currentPrice && offer.currentPrice > 0);
   
-  console.log('FBM Debug: Found', fbmOffersWithPrices.length, 'FBM offers with valid prices');
+  console.log('FBM Debug: Found', fbmOffersWithPrices.length, 'active FBM offers with valid current prices');
   console.log('FBM Debug: Price breakdown:', fbmOffersWithPrices.map(o => ({
     sellerId: o.sellerId,
-    price: o.latestPrice / 100,
-    lastSeen: o.lastSeen
+    price: o.currentPrice / 100,
+    lastSeen: new Date((o.lastSeen + 21564000) * 60 * 1000).toISOString()
   })));
   
   if (fbmOffersWithPrices.length === 0) {
-    console.log('FBM Debug: No FBM offers with valid prices found');
+    console.log('FBM Debug: No active FBM offers with valid current prices found');
     return null;
   }
   
   // Sort by price and get the lowest
-  fbmOffersWithPrices.sort((a, b) => a.latestPrice - b.latestPrice);
-  const lowestPrice = fbmOffersWithPrices[0].latestPrice / 100; // Convert from cents
-  console.log('FBM Debug: Lowest FBM price:', lowestPrice, 'from offer with lastSeen:', fbmOffersWithPrices[0].lastSeen);
+  fbmOffersWithPrices.sort((a, b) => a.currentPrice - b.currentPrice);
+  const lowestPrice = fbmOffersWithPrices[0].currentPrice / 100; // Convert from cents
+  console.log('FBM Debug: Lowest active FBM price:', lowestPrice, 'from offer with lastSeen:', new Date((fbmOffersWithPrices[0].lastSeen + 21564000) * 60 * 1000).toISOString());
   return lowestPrice;
 }
 
