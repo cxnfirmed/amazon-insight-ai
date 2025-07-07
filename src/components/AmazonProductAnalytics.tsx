@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { AmazonProduct, useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
-import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
+import { KeepaFeeCalculator } from '@/components/KeepaFeeCalculator';
 
 interface AmazonProductAnalyticsProps {
   product: AmazonProduct;
@@ -306,18 +306,8 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
               title="Keepa Price & Sales History"
             />
             
-            {/* Profitability Calculator */}
-            <ProfitabilityCalculator 
-              initialData={{
-                sellPrice: product.buy_box_price,
-                weight: 0.5,
-                dimensions: {
-                  length: 6,
-                  width: 4,
-                  height: 2
-                }
-              }}
-            />
+            {/* Keepa Fee Calculator */}
+            <KeepaFeeCalculator product={product} />
           </div>
 
           <div className="space-y-6">

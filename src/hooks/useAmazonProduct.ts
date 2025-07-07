@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -19,6 +20,12 @@ export interface AmazonProduct {
   last_updated: string | null;
   data_source: 'Keepa' | 'Error';
   debug_data?: any;
+  fees?: {
+    pickAndPackFee: number | null;
+    referralFee: number | null;
+    storageFee: number | null;
+    variableClosingFee: number | null;
+  };
   price_history?: Array<{
     timestamp: string;
     buyBoxPrice?: number | null;
@@ -65,7 +72,8 @@ export const useAmazonProduct = () => {
         lowestFBAPrice: keepaData.lowestFBAPrice,
         lowestFBMPrice: keepaData.lowestFBMPrice,
         offerCount: keepaData.offerCount,
-        estimatedMonthlySales: keepaData.estimatedMonthlySales
+        estimatedMonthlySales: keepaData.estimatedMonthlySales,
+        fees: keepaData.fees
       });
 
       const productData: AmazonProduct = {
@@ -84,6 +92,7 @@ export const useAmazonProduct = () => {
         sales_rank: keepaData.salesRank,
         last_updated: keepaData.lastUpdate,
         data_source: 'Keepa',
+        fees: keepaData.fees || null,
         debug_data: keepaResponse,
         price_history: keepaData.priceHistory || []
       };

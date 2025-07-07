@@ -25,6 +25,16 @@ interface KeepaProduct {
   offerCountHistory: number[];
   lastUpdate: number;
   monthlySold?: number;
+  fees?: {
+    pickAndPackFee?: number;
+    referralFee?: number;
+    storageFee?: number;
+    variableClosingFee?: number;
+    fbaFees?: {
+      pickAndPackFee?: number;
+      weightHandlingFee?: number;
+    };
+  };
   offers?: Array<{
     sellerId: string;
     isFBA: boolean;
@@ -489,8 +499,8 @@ serve(async (req) => {
 
     console.log(`Fetching Keepa data for ASIN: ${asin}`);
 
-    // Call Keepa API with comprehensive parameters - enhanced to get more stats
-    const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${asin}&stats=1&offers=50&buybox=1&history=1&rating=1&update=1&days=365`;
+    // Call Keepa API with comprehensive parameters - enhanced to get fees
+    const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${asin}&stats=1&offers=50&buybox=1&history=1&rating=1&update=1&days=365&stock=1&variations=0&tracking=1&fees=1`;
     
     const response = await fetch(keepaUrl);
     if (!response.ok) {
@@ -598,6 +608,20 @@ serve(async (req) => {
       }
     }
 
+    // Extract fee data from Keepa response
+    const fees = product.fees || {};
+    const feeData = {
+      pickAndPackFee: fees.pickAndPackFee ? fees.pickAndPackFee / 100 : fees.fbaFees?.pickAndPackFee ? fees.fbaFees.pickAndPackFee / 100 : null,
+      referralFee: fees.referralFee ? fees.referralFee / 100 : null,
+      storageFee: fees.storageFee ? fees.storageFee / 100 : null,
+      variableClosingFee: fees.variableClosingFee && fees.variableClosingFee > 0 ? fees.variableClosingFee / 100 : null
+    };
+
+    console.log('Fee Debug:', {
+      rawFees: fees,
+      processedFees: feeData
+    });
+
     const result = {
       success: true,
       data: {
@@ -612,6 +636,9 @@ serve(async (req) => {
         lowestFBAPrice: lowestFBAPriceUSD,
         lowestFBMPrice: lowestFBMPriceUSD,
         amazonPrice: amazonPriceUSD,
+        
+        // Fee data from Keepa
+        fees: feeData,
         
         // Sales and inventory data
         offerCount,
@@ -638,6 +665,7 @@ serve(async (req) => {
       lowestFBAPrice: result.data.lowestFBAPrice,
       lowestFBMPrice: result.data.lowestFBMPrice,
       amazonPrice: result.data.amazonPrice,
+      fees: result.data.fees,
       priceHistoryPoints: result.data.priceHistory.length,
       tokensLeft: result.data.tokensLeft,
       offerCount: result.data.offerCount,
