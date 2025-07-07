@@ -294,45 +294,54 @@ function extractMonthlySales(product: KeepaProduct): number | null {
   console.log('Sales Debug: Available stats:', product.stats);
   console.log('Sales Debug: CSV array length:', product.csv?.length);
   
-  // Priority 1: Extract "Bought in past month" from CSV data
-  // Keepa stores monthly sales data in CSV index 19 (monthlySold)
-  if (product.csv && product.csv.length > 19 && product.csv[19]) {
-    const monthlySalesData = getLastNonNullValue(product.csv[19]);
-    if (monthlySalesData && monthlySalesData > 0) {
-      console.log('Sales Debug: Found monthly sales in CSV[19]:', monthlySalesData);
-      return monthlySalesData;
+  // Priority 1: Check multiple CSV indices that might contain "Bought in past month" data
+  const potentialSalesIndices = [19, 16, 17, 18, 20, 21]; // Keepa uses different indices for sales data
+  
+  if (product.csv) {
+    console.log('Sales Debug: Checking CSV indices for monthly sales data');
+    
+    for (const index of potentialSalesIndices) {
+      if (product.csv.length > index && product.csv[index]) {
+        const salesData = getLastNonNullValue(product.csv[index]);
+        if (salesData && salesData > 0) {
+          console.log(`Sales Debug: Found monthly sales in CSV[${index}]:`, salesData);
+          return salesData;
+        }
+      }
+    }
+    
+    // Debug: Log all available CSV indices with data
+    console.log('Sales Debug: Available CSV indices with data:');
+    for (let i = 0; i < product.csv.length; i++) {
+      if (product.csv[i] && product.csv[i].length > 0) {
+        const lastValue = getLastNonNullValue(product.csv[i]);
+        if (lastValue && lastValue > 0) {
+          console.log(`  CSV[${i}]: ${lastValue}`);
+        }
+      }
     }
   }
   
-  // Priority 2: Check CSV index 16 which sometimes contains sales estimates
-  if (product.csv && product.csv.length > 16 && product.csv[16]) {
-    const salesEstimate = getLastNonNullValue(product.csv[16]);
-    if (salesEstimate && salesEstimate > 0) {
-      console.log('Sales Debug: Found sales estimate in CSV[16]:', salesEstimate);
-      return salesEstimate;
-    }
-  }
-  
-  // Priority 3: Direct sales30 from stats (if available)
+  // Priority 2: Direct sales30 from stats (if available)
   if (product.stats?.sales30 && product.stats.sales30 > 0) {
     console.log('Sales Debug: Using stats.sales30:', product.stats.sales30);
     return product.stats.sales30;
   }
   
-  // Priority 4: Calculate from sales90 (divide by 3 for monthly average)
+  // Priority 3: Calculate from sales90 (divide by 3 for monthly average)
   if (product.stats?.sales90 && product.stats.sales90 > 0) {
     const monthlySales = Math.round(product.stats.sales90 / 3);
     console.log('Sales Debug: Using stats.sales90 / 3:', monthlySales, '(original:', product.stats.sales90, ')');
     return monthlySales;
   }
   
-  // Priority 5: Use buyBoxShipped30 as estimate
+  // Priority 4: Use buyBoxShipped30 as estimate
   if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
     console.log('Sales Debug: Using stats.buyBoxShipped30:', product.stats.buyBoxShipped30);
     return product.stats.buyBoxShipped30;
   }
   
-  // Priority 6: Try sales rank drops as last resort
+  // Priority 5: Try sales rank drops as last resort
   if (product.stats?.salesRankDrops30 && product.stats.salesRankDrops30 > 0) {
     // Sales rank drops can be a rough indicator of sales activity
     const estimatedSales = Math.min(product.stats.salesRankDrops30 * 2, 5000); // More conservative estimate
