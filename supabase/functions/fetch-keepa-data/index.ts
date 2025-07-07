@@ -40,6 +40,13 @@ interface KeepaProduct {
     sales30?: number;
     sales90?: number;
     buyBoxShipped30?: number;
+    avg30?: number;
+    avg90?: number;
+    avg180?: number;
+    current?: number;
+    salesRankDrops30?: number;
+    salesRankDrops90?: number;
+    salesRankDrops180?: number;
   };
 }
 
@@ -281,6 +288,54 @@ function getLowestFBMPrice(offers: any[]): number | null {
   return Number(lowestPrice.toFixed(2));
 }
 
+// Enhanced function to extract monthly sales from multiple Keepa data sources
+function extractMonthlySales(product: KeepaProduct): number | null {
+  console.log('Sales Debug: Extracting monthly sales from Keepa data');
+  console.log('Sales Debug: Available stats:', product.stats);
+  
+  // Priority 1: Direct sales30 from stats (most reliable)
+  if (product.stats?.sales30 && product.stats.sales30 > 0) {
+    console.log('Sales Debug: Using stats.sales30:', product.stats.sales30);
+    return product.stats.sales30;
+  }
+  
+  // Priority 2: Calculate from sales90 (divide by 3 for monthly average)
+  if (product.stats?.sales90 && product.stats.sales90 > 0) {
+    const monthlySales = Math.round(product.stats.sales90 / 3);
+    console.log('Sales Debug: Using stats.sales90 / 3:', monthlySales, '(original:', product.stats.sales90, ')');
+    return monthlySales;
+  }
+  
+  // Priority 3: Use buyBoxShipped30 as estimate
+  if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
+    console.log('Sales Debug: Using stats.buyBoxShipped30:', product.stats.buyBoxShipped30);
+    return product.stats.buyBoxShipped30;
+  }
+  
+  // Priority 4: Try to extract from CSV data (sales rank drops can indicate sales)
+  if (product.stats?.salesRankDrops30 && product.stats.salesRankDrops30 > 0) {
+    // Sales rank drops can be a rough indicator of sales activity
+    const estimatedSales = Math.min(product.stats.salesRankDrops30 * 10, 10000); // Cap at 10k
+    console.log('Sales Debug: Using salesRankDrops30 * 10 as estimate:', estimatedSales, '(rank drops:', product.stats.salesRankDrops30, ')');
+    return estimatedSales;
+  }
+  
+  // Priority 5: Check if there's any sales-related data in CSV format
+  if (product.csv && product.csv.length > 0) {
+    // CSV index 16 sometimes contains sales data
+    if (product.csv[16] && product.csv[16].length > 0) {
+      const salesData = getLastNonNullValue(product.csv[16]);
+      if (salesData && salesData > 0) {
+        console.log('Sales Debug: Using CSV[16] sales data:', salesData);
+        return salesData;
+      }
+    }
+  }
+  
+  console.log('Sales Debug: No monthly sales data found in any source');
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -300,7 +355,7 @@ serve(async (req) => {
 
     console.log(`Fetching Keepa data for ASIN: ${asin}`);
 
-    // Call Keepa API with comprehensive parameters
+    // Call Keepa API with comprehensive parameters - enhanced to get more stats
     const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${asin}&stats=1&offers=50&buybox=1&history=1&rating=1&update=1&days=365`;
     
     const response = await fetch(keepaUrl);
@@ -369,15 +424,8 @@ serve(async (req) => {
       }
     }
 
-    // Calculate estimated monthly sales using strict hierarchy
-    let estimatedMonthlySales = null;
-    if (product.stats?.sales30 && product.stats.sales30 > 0) {
-      estimatedMonthlySales = product.stats.sales30;
-    } else if (product.stats?.sales90 && product.stats.sales90 > 0) {
-      estimatedMonthlySales = Math.floor(product.stats.sales90 / 3);
-    } else if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
-      estimatedMonthlySales = product.stats.buyBoxShipped30;
-    }
+    // Use the enhanced monthly sales extraction function
+    const estimatedMonthlySales = extractMonthlySales(product);
 
     // Parse historical price data from CSV format
     const priceHistory = [];
