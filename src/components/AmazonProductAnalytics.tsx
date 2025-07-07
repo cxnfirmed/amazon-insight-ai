@@ -89,57 +89,12 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
   };
 
   const getAmazonPrice = () => {
-    console.log('AMZ Debug: Looking for Amazon (ATVPDKIKX0DER) price');
+    console.log('AMZ Debug: Checking for Amazon price in product data');
     
-    // Check if we have offers data from Keepa
-    if (product.debug_data?.offers && Array.isArray(product.debug_data.offers)) {
-      console.log('AMZ Debug: Found offers array with', product.debug_data.offers.length, 'offers');
-      
-      // Look for Amazon's seller (ATVPDKIKX0DER)
-      const amazonOffer = product.debug_data.offers.find(offer => 
-        offer.sellerId === 'ATVPDKIKX0DER'
-      );
-      
-      if (amazonOffer) {
-        console.log('AMZ Debug: Found Amazon offer:', amazonOffer);
-        
-        // Get current price from offerCSV (most recent price)
-        if (amazonOffer.offerCSV && amazonOffer.offerCSV.length > 0) {
-          // offerCSV format: [timestamp, price, shipping, timestamp, price, shipping, ...]
-          // Get the most recent price (last price entry)
-          for (let i = amazonOffer.offerCSV.length - 2; i >= 1; i -= 3) {
-            if (amazonOffer.offerCSV[i] && amazonOffer.offerCSV[i] > 0) {
-              const price = amazonOffer.offerCSV[i] / 100; // Convert from cents
-              console.log('AMZ Debug: Found Amazon price from offerCSV:', price);
-              return `$${price.toFixed(2)}`;
-            }
-          }
-        }
-        
-        // Fallback to offer.price if offerCSV doesn't have data
-        if (amazonOffer.price && amazonOffer.price > 0) {
-          const price = amazonOffer.price / 100; // Convert from cents
-          console.log('AMZ Debug: Found Amazon price from offer.price:', price);
-          return `$${price.toFixed(2)}`;
-        }
-      } else {
-        console.log('AMZ Debug: Amazon (ATVPDKIKX0DER) not found in offers');
-      }
-    } else {
-      console.log('AMZ Debug: No offers data available');
-    }
-    
-    // Check in CSV data for Amazon price (index 1 is typically Amazon price)
-    if (product.debug_data?.csv && product.debug_data.csv[1]) {
-      const amazonPriceHistory = product.debug_data.csv[1];
-      // Get the most recent non-null price
-      for (let i = amazonPriceHistory.length - 1; i >= 0; i--) {
-        if (amazonPriceHistory[i] && amazonPriceHistory[i] > 0) {
-          const price = amazonPriceHistory[i] / 100; // Convert from cents
-          console.log('AMZ Debug: Found Amazon price from CSV[1]:', price);
-          return `$${price.toFixed(2)}`;
-        }
-      }
+    // Use the amazonPrice from the API response
+    if (product.amazon_price !== null && product.amazon_price !== undefined) {
+      console.log('AMZ Debug: Found Amazon price from API:', product.amazon_price);
+      return `$${product.amazon_price.toFixed(2)}`;
     }
     
     console.log('AMZ Debug: No Amazon price found, returning None');

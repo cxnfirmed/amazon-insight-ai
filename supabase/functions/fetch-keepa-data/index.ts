@@ -36,6 +36,7 @@ interface KeepaProduct {
     shipping: number;
     availability: number;
     lastSeen: number;
+    offerCSV?: number[];
   }>;
   stats?: {
     sales30?: number;
@@ -65,6 +66,80 @@ function getLastNonNullValue(arr: number[]): number | null {
       return arr[i];
     }
   }
+  return null;
+}
+
+// Helper function to extract latest price from offerCSV
+function getLatestPriceFromOfferCSV(offerCSV: number[]): number | null {
+  if (!offerCSV || offerCSV.length === 0) return null;
+  
+  console.log('Price Debug: Processing offerCSV with length:', offerCSV.length);
+  
+  // offerCSV contains [timestamp, price, shipping, timestamp, price, shipping, ...]
+  // Scan backwards through the array in groups of 3 (timestamp, price, shipping)
+  for (let i = offerCSV.length - 2; i >= 1; i -= 3) {
+    if (offerCSV[i] && offerCSV[i] > 0) {
+      console.log('Latest Price Debug: Found price at index', i, ':', offerCSV[i]);
+      return offerCSV[i];
+    }
+  }
+  
+  return null;
+}
+
+// Helper function to get Amazon price from offers
+function getAmazonPrice(offers: any[]): number | null {
+  if (!offers || offers.length === 0) {
+    console.log('AMZ Debug: No offers available');
+    return null;
+  }
+  
+  console.log('AMZ Debug: Checking', offers.length, 'offers for Amazon (ATVPDKIKX0DER)');
+  
+  // Find all Amazon offers with condition 1 (new)
+  const amazonOffers = offers.filter(offer => 
+    offer.sellerId === 'ATVPDKIKX0DER' && offer.condition === 1
+  );
+  
+  if (amazonOffers.length === 0) {
+    console.log('AMZ Debug: No Amazon offers found with sellerId ATVPDKIKX0DER and condition 1');
+    return null;
+  }
+  
+  console.log('AMZ Debug: Found', amazonOffers.length, 'Amazon offers');
+  
+  let lowestPrice = null;
+  
+  for (const offer of amazonOffers) {
+    let priceFromCSV = null;
+    
+    // Try to get price from offerCSV first
+    if (offer.offerCSV && offer.offerCSV.length > 0) {
+      priceFromCSV = getLatestPriceFromOfferCSV(offer.offerCSV);
+      if (priceFromCSV) {
+        console.log('AMZ Debug: Found price from offerCSV:', priceFromCSV / 100);
+        if (!lowestPrice || priceFromCSV < lowestPrice) {
+          lowestPrice = priceFromCSV;
+        }
+      }
+    }
+    
+    // Fallback to offer.price if no offerCSV data
+    if (!priceFromCSV && offer.price && offer.price > 0) {
+      console.log('AMZ Debug: Using fallback price from offer.price:', offer.price / 100);
+      if (!lowestPrice || offer.price < lowestPrice) {
+        lowestPrice = offer.price;
+      }
+    }
+  }
+  
+  if (lowestPrice) {
+    const finalPrice = lowestPrice / 100; // Convert from cents to dollars
+    console.log('AMZ Debug: Final Amazon price:', finalPrice);
+    return Number(finalPrice.toFixed(2));
+  }
+  
+  console.log('AMZ Debug: No valid Amazon price found');
   return null;
 }
 
@@ -131,22 +206,6 @@ function isOfferCurrentlyActive(lastSeen: number): boolean {
   
   // Consider offer active if last seen within 6 hours (much more restrictive)
   return hoursSinceLastSeen <= 6;
-}
-
-// Helper function to get latest price from offerCSV - scans backward for most recent price > 0
-function getLatestPriceFromOfferCSV(offerCSV: number[]): number | null {
-  if (!offerCSV || offerCSV.length === 0) return null;
-  
-  // offerCSV contains [timestamp, price, shipping, timestamp, price, shipping, ...]
-  // Scan backwards through the array in groups of 3 (timestamp, price, shipping)
-  for (let i = offerCSV.length - 2; i >= 1; i -= 3) {
-    if (offerCSV[i] && offerCSV[i] > 0) {
-      console.log('Latest Price Debug: Found price at index', i, ':', offerCSV[i]);
-      return offerCSV[i];
-    }
-  }
-  
-  return null;
 }
 
 // Helper function to get lowest FBA price from current offers - ENHANCED with strict timing
@@ -475,11 +534,15 @@ serve(async (req) => {
     // Use the new functions to get accurate current FBA and FBM prices
     const lowestFBAPriceUSD = getLowestFBAPrice(product.offers || []);
     const lowestFBMPriceUSD = getLowestFBMPrice(product.offers || []);
+    
+    // Get Amazon price using the new function
+    const amazonPriceUSD = getAmazonPrice(product.offers || []);
 
     console.log('Pricing Debug:', {
       buyBoxPriceUSD: buyBoxPriceUSD,
       lowestFBAPriceUSD: lowestFBAPriceUSD,
       lowestFBMPriceUSD: lowestFBMPriceUSD,
+      amazonPriceUSD: amazonPriceUSD,
       totalOffers: product.offers?.length || 0
     });
 
@@ -548,6 +611,7 @@ serve(async (req) => {
         buyBoxPrice: buyBoxPriceUSD,
         lowestFBAPrice: lowestFBAPriceUSD,
         lowestFBMPrice: lowestFBMPriceUSD,
+        amazonPrice: amazonPriceUSD,
         
         // Sales and inventory data
         offerCount,
@@ -573,6 +637,7 @@ serve(async (req) => {
       buyBoxPrice: result.data.buyBoxPrice,
       lowestFBAPrice: result.data.lowestFBAPrice,
       lowestFBMPrice: result.data.lowestFBMPrice,
+      amazonPrice: result.data.amazonPrice,
       priceHistoryPoints: result.data.priceHistory.length,
       tokensLeft: result.data.tokensLeft,
       offerCount: result.data.offerCount,

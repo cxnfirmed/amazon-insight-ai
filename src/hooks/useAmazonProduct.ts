@@ -1,140 +1,142 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 export interface AmazonProduct {
   asin: string;
   title: string;
-  manufacturer?: string;
-  category?: string;
-  image_url?: string;
-  buy_box_price?: number;
-  lowest_fba_price?: number;
-  lowest_fbm_price?: number;
-  offer_count?: number;
-  estimated_monthly_sales?: number;
-  in_stock?: boolean;
-  sales_rank?: number;
+  manufacturer: string | null;
+  category: string;
+  image_url: string | null;
+  buy_box_price: number | null;
+  lowest_fba_price: number | null;
+  lowest_fbm_price: number | null;
+  amazon_price: number | null;
+  offer_count: number;
+  estimated_monthly_sales: number | null;
+  in_stock: boolean;
+  sales_rank: number | null;
+  last_updated: string | null;
+  data_source: 'Keepa' | 'Error';
+  debug_data?: any;
   price_history?: Array<{
     timestamp: string;
-    buyBoxPrice?: number;
-    amazonPrice?: number;
-    newPrice?: number;
-    salesRank?: number;
+    buyBoxPrice?: number | null;
+    amazonPrice?: number | null;
+    newPrice?: number | null;
+    salesRank?: number | null;
     offerCount?: number;
   }>;
-  data_source?: 'Keepa' | 'Error';
-  last_updated?: string;
-  debug_data?: any;
 }
 
 export const useAmazonProduct = () => {
-  const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState<AmazonProduct | null>(null);
+  const [loading, setLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const { toast } = useToast();
 
-  const fetchProduct = async (identifier: string, forceFresh: boolean = false) => {
-    if (!identifier) return;
-
-    console.log('Starting Keepa product fetch for ASIN:', identifier);
+  const fetchProduct = useCallback(async (asin: string, forceFresh = false) => {
     setLoading(true);
     setProduct(null);
-    
+
     try {
-      console.log('Fetching product data from Keepa API...');
-      
+      console.log('Fetching product data for ASIN:', asin);
+
+      // Call Keepa API
       const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
-        body: { asin: identifier, domain: 1 }
+        body: { asin }
       });
 
-      if (keepaResponse?.success && keepaResponse.data) {
-        console.log('Keepa fetch successful:', keepaResponse.data);
-        
-        const keepaData = keepaResponse.data;
-        
-        // Build product from Keepa data
-        const keepaProduct: AmazonProduct = {
-          asin: identifier,
-          title: keepaData.title,
-          manufacturer: keepaData.manufacturer,
-          category: keepaData.category,
-          image_url: keepaData.imageUrl,
-          
-          // Pricing data
-          buy_box_price: keepaData.buyBoxPrice,
-          lowest_fba_price: keepaData.lowestFBAPrice,
-          lowest_fbm_price: keepaData.lowestFBMPrice,
-          
-          // Sales and inventory
-          offer_count: keepaData.offerCount,
-          estimated_monthly_sales: keepaData.estimatedMonthlySales,
-          in_stock: keepaData.inStock,
-          sales_rank: keepaData.salesRank,
-          
-          // Historical data
-          price_history: keepaData.priceHistory || [],
-          
-          data_source: 'Keepa',
-          last_updated: new Date().toISOString(),
-          debug_data: debugMode ? keepaResponse : undefined
-        };
-
-        setProduct(keepaProduct);
-        
-        toast({
-          title: "Keepa Data Loaded",
-          description: `Product data loaded: ${keepaProduct.title}`,
-        });
-        
-        return;
+      if (keepaError) {
+        console.error('Keepa API call failed:', keepaError);
+        throw new Error(`Keepa API failed: ${keepaError.message}`);
       }
 
-      // Keepa API failed
-      console.error('Keepa API failed:', keepaError);
-      
-      toast({
-        title: "Keepa API Failed",
-        description: `Unable to fetch data for ASIN ${identifier}. ${keepaError?.message || 'API error occurred'}`,
-        variant: "destructive",
+      if (!keepaResponse?.success) {
+        console.error('Keepa API returned unsuccessful response:', keepaResponse);
+        throw new Error(keepaResponse?.error || 'Failed to fetch product data from Keepa');
+      }
+
+      const keepaData = keepaResponse.data;
+      console.log('Keepa API successful, processing data...', {
+        title: keepaData.title,
+        buyBoxPrice: keepaData.buyBoxPrice,
+        amazonPrice: keepaData.amazonPrice,
+        lowestFBAPrice: keepaData.lowestFBAPrice,
+        lowestFBMPrice: keepaData.lowestFBMPrice,
+        offerCount: keepaData.offerCount,
+        estimatedMonthlySales: keepaData.estimatedMonthlySales
       });
 
-      // Set error state product
-      setProduct({
-        asin: identifier,
-        title: 'Keepa API data not available',
-        data_source: 'Error',
-        last_updated: new Date().toISOString(),
-        debug_data: debugMode ? { keepaError } : undefined
-      } as AmazonProduct);
+      const productData: AmazonProduct = {
+        asin: keepaData.asin,
+        title: keepaData.title || 'Product title not available',
+        manufacturer: keepaData.manufacturer,
+        category: keepaData.category || 'Unknown',
+        image_url: keepaData.imageUrl,
+        buy_box_price: keepaData.buyBoxPrice,
+        lowest_fba_price: keepaData.lowestFBAPrice,
+        lowest_fbm_price: keepaData.lowestFBMPrice,
+        amazon_price: keepaData.amazonPrice,
+        offer_count: keepaData.offerCount || 0,
+        estimated_monthly_sales: keepaData.estimatedMonthlySales,
+        in_stock: keepaData.inStock || false,
+        sales_rank: keepaData.salesRank,
+        last_updated: keepaData.lastUpdate,
+        data_source: 'Keepa',
+        debug_data: keepaResponse,
+        price_history: keepaData.priceHistory || []
+      };
+
+      console.log('Product data processed successfully:', productData.title);
+      setProduct(productData);
+
+      toast({
+        title: "Product Data Updated",
+        description: `Successfully fetched data for ${productData.title}`,
+      });
 
     } catch (error) {
-      console.error('Critical error in fetchProduct:', error);
+      console.error('Product fetch error:', error);
+      
+      // Create error product object
+      const errorProduct: AmazonProduct = {
+        asin,
+        title: 'Error loading product',
+        manufacturer: null,
+        category: 'Unknown',
+        image_url: null,
+        buy_box_price: null,
+        lowest_fba_price: null,
+        lowest_fbm_price: null,
+        amazon_price: null,
+        offer_count: 0,
+        estimated_monthly_sales: null,
+        in_stock: false,
+        sales_rank: null,
+        last_updated: null,
+        data_source: 'Error',
+        debug_data: { error: error.message }
+      };
+      
+      setProduct(errorProduct);
       
       toast({
-        title: "System Error",
-        description: `Critical error fetching product data: ${error.message}`,
+        title: "Error",
+        description: `Failed to fetch product data: ${error.message}`,
         variant: "destructive",
       });
-
-      setProduct({
-        asin: identifier,
-        title: 'System error occurred',
-        data_source: 'Error',
-        last_updated: new Date().toISOString(),
-        debug_data: debugMode ? { error: error.message } : undefined
-      } as AmazonProduct);
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   return {
-    loading,
     product,
-    fetchProduct,
-    setProduct,
+    loading,
     debugMode,
-    setDebugMode
+    setDebugMode,
+    fetchProduct,
+    setProduct
   };
 };
