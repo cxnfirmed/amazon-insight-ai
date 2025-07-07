@@ -141,7 +141,7 @@ function getLatestPriceFromOfferCSV(offerCSV: number[]): number | null {
   return null;
 }
 
-// Helper function to get lowest FBA price from current offers
+// Helper function to get lowest FBA price from current offers - ENHANCED with strict timing
 function getLowestFBAPrice(offers: any[]): number | null {
   if (!offers || offers.length === 0) {
     console.log('FBA Debug: No offers array or empty offers');
@@ -150,25 +150,65 @@ function getLowestFBAPrice(offers: any[]): number | null {
   
   console.log('FBA Debug: Processing', offers.length, 'offers for FBA');
   
-  // Find all FBA offers and get their current prices
-  const fbaOffers = offers.filter(offer => 
-    offer.isFBA === true && offer.offerCSV && offer.offerCSV.length > 0
-  ).map(offer => ({
-    ...offer,
-    currentPrice: getCurrentPriceFromOfferCSV(offer.offerCSV)
-  })).filter(offer => offer.currentPrice && offer.currentPrice > 0);
+  // Filter for FBA offers with much stricter conditions (6-hour window)
+  const fbaOffers = offers.filter(offer => {
+    const isValidFBA = offer.isFBA === true && 
+                      offer.condition === 1 && 
+                      offer.offerCSV && 
+                      offer.offerCSV.length > 0 &&
+                      offer.lastSeen &&
+                      isOfferCurrentlyActive(offer.lastSeen);
+    
+    if (isValidFBA) {
+      console.log('FBA Debug: Valid FBA offer found - Seller:', offer.sellerId, 
+                  'LastSeen:', new Date((offer.lastSeen + 21564000) * 60 * 1000).toISOString(),
+                  'OfferCSV length:', offer.offerCSV.length);
+    } else if (offer.isFBA === true && offer.condition === 1) {
+      console.log('FBA Debug: FBA offer rejected - Seller:', offer.sellerId, 
+                  'LastSeen:', offer.lastSeen ? new Date((offer.lastSeen + 21564000) * 60 * 1000).toISOString() : 'null',
+                  'Hours ago:', offer.lastSeen ? ((new Date().getTime() - (offer.lastSeen + 21564000) * 60 * 1000) / (1000 * 60 * 60)).toFixed(1) : 'N/A');
+    }
+    
+    return isValidFBA;
+  });
   
-  console.log('FBA Debug: Found', fbaOffers.length, 'FBA offers with valid prices');
+  console.log('FBA Debug: Found', fbaOffers.length, 'valid active FBA offers (6-hour window)');
   
   if (fbaOffers.length === 0) {
+    console.log('FBA Debug: No valid active FBA offers found within 6 hours');
     return null;
   }
   
-  // Sort by price and get the lowest
-  fbaOffers.sort((a, b) => a.currentPrice - b.currentPrice);
-  const lowestPrice = fbaOffers[0].currentPrice / 100; // Convert from cents
-  console.log('FBA Debug: Lowest FBA price:', lowestPrice);
-  return lowestPrice;
+  // Extract current prices using the enhanced getCurrentPriceFromOfferCSV function
+  const fbaOffersWithPrices = fbaOffers.map(offer => {
+    const currentPrice = getCurrentPriceFromOfferCSV(offer.offerCSV);
+    console.log('FBA Debug: Offer', offer.sellerId, 'current price:', currentPrice ? (currentPrice / 100).toFixed(2) : 'null');
+    return {
+      ...offer,
+      currentPrice: currentPrice
+    };
+  }).filter(offer => offer.currentPrice && offer.currentPrice > 0);
+  
+  console.log('FBA Debug: Found', fbaOffersWithPrices.length, 'FBA offers with valid current prices (6-hour window)');
+  
+  if (fbaOffersWithPrices.length === 0) {
+    console.log('FBA Debug: No FBA offers with valid current prices found within 6 hours');
+    return null;
+  }
+  
+  // Sort by current price and get the lowest
+  fbaOffersWithPrices.sort((a, b) => a.currentPrice - b.currentPrice);
+  const lowestPrice = fbaOffersWithPrices[0].currentPrice / 100; // Convert from cents
+  
+  console.log('FBA Debug: Final lowest FBA price (6-hour window):', lowestPrice.toFixed(2), 'from seller:', fbaOffersWithPrices[0].sellerId);
+  console.log('FBA Debug: All active FBA prices found (6-hour window):', fbaOffersWithPrices.map(o => ({
+    seller: o.sellerId,
+    price: (o.currentPrice / 100).toFixed(2),
+    lastSeen: new Date((o.lastSeen + 21564000) * 60 * 1000).toISOString(),
+    hoursAgo: ((new Date().getTime() - (o.lastSeen + 21564000) * 60 * 1000) / (1000 * 60 * 60)).toFixed(1)
+  })));
+  
+  return Number(lowestPrice.toFixed(2));
 }
 
 // Helper function to get lowest FBM price from current offers - ENHANCED VERSION with much stricter filtering
