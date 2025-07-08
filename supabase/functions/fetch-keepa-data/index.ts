@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -183,7 +182,7 @@ serve(async (req) => {
     }
     
     console.log('Final sales rank decision:', salesRank);
-    
+
     // IMPROVED FBA PRICE CALCULATION - Calculate from offers array
     console.log('=== FBA PRICE CALCULATION ===');
     let lowestFBAPrice = null;
@@ -198,19 +197,45 @@ serve(async (req) => {
         console.log(`Checking offer ${i}:`, {
           isFBA: offer.isFBA,
           condition: offer.condition,
-          offerCSV: offer.offerCSV ? `Array length: ${offer.offerCSV.length}` : 'No CSV data'
+          offerCSV: offer.offerCSV ? `Array length: ${offer.offerCSV.length}` : 'No CSV data',
+          fullOfferCSV: offer.offerCSV ? offer.offerCSV.slice(-10) : 'No CSV data' // Show last 10 values for debugging
         });
         
         // Check if this is an FBA offer with new condition
         if (offer.isFBA === true && offer.condition === 1) {
+          console.log(`Found FBA offer ${i} with new condition`);
+          
           // Extract the most recent price from offerCSV
-          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
-            // Get the 3rd value from the end (most recent price)
-            const recentPrice = offer.offerCSV[offer.offerCSV.length - 3];
-            if (typeof recentPrice === 'number' && recentPrice > 0) {
-              const priceInDollars = recentPrice / 100; // Convert from cents to dollars
-              validFBAPrices.push(priceInDollars);
-              console.log(`Found valid FBA price from offer ${i}: $${priceInDollars}`);
+          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length > 0) {
+            // The offerCSV array contains [timestamp, price, shipping] triplets
+            // We need to find the most recent price entry
+            console.log(`Offer ${i} CSV data (last 10):`, offer.offerCSV.slice(-10));
+            
+            // Look for the most recent valid price
+            // Work backwards through the array looking for valid price entries
+            for (let j = offer.offerCSV.length - 1; j >= 1; j -= 3) {
+              const price = offer.offerCSV[j - 1]; // Price is the middle value in each triplet
+              
+              if (typeof price === 'number' && price > 0 && price < 1000000) { // Reasonable price range
+                const priceInDollars = price / 100; // Convert from cents to dollars
+                validFBAPrices.push(priceInDollars);
+                console.log(`Found valid FBA price from offer ${i}: $${priceInDollars} (raw: ${price})`);
+                break; // Use the most recent valid price
+              }
+            }
+            
+            // Fallback: if no valid price found in the structured way, try the simple approach
+            if (validFBAPrices.length === 0) {
+              // Try to find any reasonable price value in the array
+              for (let k = offer.offerCSV.length - 1; k >= 0; k--) {
+                const value = offer.offerCSV[k];
+                if (typeof value === 'number' && value > 100 && value < 1000000) { // Reasonable price range in cents
+                  const priceInDollars = value / 100;
+                  validFBAPrices.push(priceInDollars);
+                  console.log(`Fallback: Found valid FBA price from offer ${i}: $${priceInDollars} (raw: ${value})`);
+                  break;
+                }
+              }
             }
           }
         }
@@ -219,15 +244,30 @@ serve(async (req) => {
       if (validFBAPrices.length > 0) {
         lowestFBAPrice = Math.min(...validFBAPrices);
         console.log('Calculated lowest FBA price from offers:', lowestFBAPrice);
+        console.log('All valid FBA prices found:', validFBAPrices);
       } else {
         console.log('No valid FBA offers found with new condition');
       }
     } else {
-      console.log('No offers array found, falling back to stats.current[0]');
-      // Fallback to stats if offers array is not available
-      if (currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
-        lowestFBAPrice = currentStats[0] / 100;
-        console.log('Fallback FBA price from stats.current[0]:', lowestFBAPrice);
+      console.log('No offers array found, falling back to stats approach');
+    }
+    
+    // If no valid FBA price found from offers array, fallback to stats but with better logic
+    if (lowestFBAPrice === null) {
+      console.log('No FBA price found from offers, checking stats for FBA price indicators');
+      
+      // Check multiple stat indices that might contain FBA prices
+      const fbaStatIndices = [16, 17, 18]; // Common indices for FBA-related prices
+      
+      for (const index of fbaStatIndices) {
+        if (currentStats[index] !== undefined && currentStats[index] !== null && currentStats[index] !== -1) {
+          const potentialPrice = currentStats[index] / 100;
+          if (potentialPrice > 1 && potentialPrice < 10000) { // Reasonable price range
+            lowestFBAPrice = potentialPrice;
+            console.log(`Found FBA price from stats.current[${index}]:`, lowestFBAPrice);
+            break;
+          }
+        }
       }
     }
     
