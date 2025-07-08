@@ -52,6 +52,7 @@ interface DataQualityStats {
       rawCount: number;
       validCount: number;
       filteredCount: number;
+      filterReasons: string[];
     };
   };
 }
@@ -86,25 +87,36 @@ const COLOR_SCHEME = {
 // Keepa epoch: January 1, 2011 00:00:00 UTC
 const KEEPA_EPOCH = new Date('2011-01-01T00:00:00.000Z').getTime();
 
-// Enhanced price validation functions
+// Enhanced price validation functions with improved Buy Box logic
 const isValidPrice = (price: number): boolean => {
   return typeof price === 'number' && price > 0.01 && price < 10000;
 };
 
-const isValidBuyBoxPrice = (price: number, offerCount: number, recentMedian?: number): boolean => {
-  if (!isValidPrice(price) || offerCount <= 0) {
+// Updated Buy Box validation - now allows missing offer count
+const isValidBuyBoxPrice = (price: number, offerCount?: number, recentMedian?: number): boolean => {
+  console.log(`Validating Buy Box price: $${price}, offerCount: ${offerCount}, median: ${recentMedian}`);
+  
+  if (!isValidPrice(price)) {
+    console.log(`Buy Box price $${price} failed basic price validation`);
     return false;
   }
   
-  // If we have recent median data, check for extreme spikes
-  if (recentMedian && recentMedian > 0) {
+  // Only filter out if offer count is explicitly 0 (not missing/undefined)
+  if (typeof offerCount === 'number' && offerCount <= 0) {
+    console.log(`Buy Box price $${price} filtered - offer count is ${offerCount}`);
+    return false;
+  }
+  
+  // If we have recent median data and offer count, check for extreme spikes
+  if (recentMedian && recentMedian > 0 && typeof offerCount === 'number') {
     const spikeThreshold = 2.5;
     if (price > recentMedian * spikeThreshold && offerCount < 2) {
-      console.log(`Filtering Buy Box spike: $${price.toFixed(2)} vs median $${recentMedian.toFixed(2)}, offers: ${offerCount}`);
+      console.log(`Buy Box spike filtered: $${price.toFixed(2)} vs median $${recentMedian.toFixed(2)}, offers: ${offerCount}`);
       return false;
     }
   }
   
+  console.log(`Buy Box price $${price} validated successfully`);
   return true;
 };
 
@@ -118,39 +130,70 @@ const keepaTimeToMs = (keepaMinutes: number): number => {
   return KEEPA_EPOCH + (keepaMinutes * 60 * 1000);
 };
 
-// Parse individual CSV series into timestamp-value pairs with validation
-const parseCsvSeries = (csvArray: number[], seriesType: string): { series: ParsedSeries; stats: { rawCount: number; validCount: number; filteredCount: number } } => {
+// Enhanced CSV parsing with better -1 handling and debugging
+const parseCsvSeries = (csvArray: number[], seriesType: string): { series: ParsedSeries; stats: { rawCount: number; validCount: number; filteredCount: number; filterReasons: string[] } } => {
   const series: ParsedSeries = {};
-  const stats = { rawCount: 0, validCount: 0, filteredCount: 0 };
+  const stats = { rawCount: 0, validCount: 0, filteredCount: 0, filterReasons: [] as string[] };
   
   if (!Array.isArray(csvArray) || csvArray.length < 2) {
+    console.log(`${seriesType}: No data or invalid array`);
     return { series, stats };
   }
   
   stats.rawCount = Math.floor(csvArray.length / 2);
+  console.log(`${seriesType}: Processing ${stats.rawCount} raw data points`);
+  console.log(`${seriesType}: Sample raw data:`, csvArray.slice(0, 10));
   
   // Parse alternating [timestamp, value, timestamp, value, ...] format
   for (let i = 0; i < csvArray.length - 1; i += 2) {
     const timestampMinutes = csvArray[i];
-    const value = csvArray[i + 1];
+    const rawValue = csvArray[i + 1];
     
-    if (typeof timestampMinutes === 'number' && typeof value === 'number' && value !== -1) {
-      // Convert price values (divide by 100) except for non-price fields
-      let processedValue = value;
-      if (['amazon', 'fba', 'fbm', 'buyBox'].includes(seriesType)) {
-        processedValue = value / 100;
-      } else if (seriesType === 'rating') {
-        processedValue = value / 10;
-      }
-      
+    if (typeof timestampMinutes !== 'number' || typeof rawValue !== 'number') {
+      stats.filteredCount++;
+      stats.filterReasons.push('Invalid timestamp or value type');
+      continue;
+    }
+    
+    // Skip Keepa's -1 placeholder values
+    if (rawValue === -1) {
+      stats.filteredCount++;
+      stats.filterReasons.push('Keepa placeholder (-1)');
+      continue;
+    }
+    
+    // Convert price values (divide by 100) except for non-price fields
+    let processedValue = rawValue;
+    if (['amazon', 'fba', 'fbm', 'buyBox'].includes(seriesType)) {
+      processedValue = rawValue / 100;
+    } else if (seriesType === 'rating') {
+      processedValue = rawValue / 10;
+    }
+    
+    // Apply validation based on series type
+    let isValid = false;
+    if (['amazon', 'fba', 'fbm', 'buyBox'].includes(seriesType)) {
+      isValid = processedValue > 0.01 && processedValue < 50000;
+    } else {
+      isValid = processedValue >= 0; // Allow zero for counts, ranks, etc.
+    }
+    
+    if (isValid) {
       series[timestampMinutes] = processedValue;
       stats.validCount++;
     } else {
       stats.filteredCount++;
+      stats.filterReasons.push(`Invalid ${seriesType} value: ${processedValue}`);
     }
   }
   
-  console.log(`Parsed ${seriesType} series: ${stats.rawCount} raw points, ${stats.validCount} valid, ${stats.filteredCount} filtered`);
+  console.log(`${seriesType} parsing results:`, {
+    raw: stats.rawCount,
+    valid: stats.validCount,
+    filtered: stats.filteredCount,
+    sampleReasons: stats.filterReasons.slice(0, 5)
+  });
+  
   return { series, stats };
 };
 
@@ -207,7 +250,7 @@ const filterPriceSpikes = (data: ChartDataPoint[], field: keyof ChartDataPoint):
   });
 };
 
-// Merge multiple series by timestamp with enhanced validation
+// Enhanced merge function with improved Buy Box handling
 const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, offerCountSeries: ParsedSeries): { data: ChartDataPoint[]; stats: DataQualityStats } => {
   // Collect all unique timestamps
   const allTimestamps = new Set<number>();
@@ -216,6 +259,11 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     Object.keys(series).forEach(timestamp => {
       allTimestamps.add(Number(timestamp));
     });
+  });
+  
+  // Add offer count timestamps
+  Object.keys(offerCountSeries).forEach(timestamp => {
+    allTimestamps.add(Number(timestamp));
   });
   
   // Sort timestamps
@@ -229,9 +277,12 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
   };
   
   // Initialize series stats
-  Object.keys(seriesData).forEach(key => {
-    stats.seriesStats[key] = { rawCount: 0, validCount: 0, filteredCount: 0 };
+  ['amazon', 'fba', 'fbm', 'buyBox', 'salesRank', 'offerCount'].forEach(key => {
+    stats.seriesStats[key] = { rawCount: 0, validCount: 0, filteredCount: 0, filterReasons: [] };
   });
+  
+  console.log(`Merging data across ${sortedTimestamps.length} timestamps`);
+  console.log('Offer count data points:', Object.keys(offerCountSeries).length);
   
   // Create merged data points with enhanced validation
   const dataPoints: ChartDataPoint[] = sortedTimestamps.map(keepaTimestamp => {
@@ -248,7 +299,26 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     const rating = seriesData.rating?.[keepaTimestamp];
     const reviewCount = seriesData.reviewCount?.[keepaTimestamp];
     
-    // Apply validation with series-specific logic
+    // Enhanced Buy Box validation - no longer requires offer count
+    let validatedBuyBoxPrice: number | undefined = undefined;
+    if (buyBoxPrice !== undefined) {
+      stats.seriesStats.buyBox.rawCount++;
+      
+      // Calculate recent median for spike detection (optional)
+      const recentMedian = undefined; // Simplified for now
+      
+      if (isValidBuyBoxPrice(buyBoxPrice, offerCount, recentMedian)) {
+        validatedBuyBoxPrice = buyBoxPrice;
+        stats.seriesStats.buyBox.validCount++;
+        stats.validPoints++;
+      } else {
+        stats.seriesStats.buyBox.filteredCount++;
+        stats.seriesStats.buyBox.filterReasons.push(`Filtered Buy Box: $${buyBoxPrice}`);
+        stats.filteredPoints++;
+      }
+    }
+    
+    // Validate other price fields
     const validatedData = {
       timestamp: date.toISOString(),
       timestampMs,
@@ -256,24 +326,20 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
       amazonPrice: amazonPrice && isValidPrice(amazonPrice) ? amazonPrice : undefined,
       fbaPrice: fbaPrice && isValidFbaFbmPrice(fbaPrice) ? fbaPrice : undefined,
       fbmPrice: fbmPrice && isValidFbaFbmPrice(fbmPrice) ? fbmPrice : undefined,
-      buyBoxPrice: buyBoxPrice && offerCount !== undefined && isValidBuyBoxPrice(buyBoxPrice, offerCount) ? buyBoxPrice : undefined,
+      buyBoxPrice: validatedBuyBoxPrice,
       salesRank: salesRank || undefined,
       offerCount: offerCount || undefined,
       rating: rating || undefined,
       reviewCount: reviewCount || undefined
     };
     
-    // Update stats
-    ['amazonPrice', 'fbaPrice', 'fbmPrice', 'buyBoxPrice'].forEach(field => {
+    // Update stats for other fields
+    ['amazonPrice', 'fbaPrice', 'fbmPrice'].forEach(field => {
       const key = field.replace('Price', '');
+      const value = validatedData[field as keyof typeof validatedData];
       if (stats.seriesStats[key]) {
-        stats.seriesStats[key].rawCount++;
-        if (validatedData[field as keyof typeof validatedData]) {
+        if (value !== undefined) {
           stats.seriesStats[key].validCount++;
-          stats.validPoints++;
-        } else {
-          stats.seriesStats[key].filteredCount++;
-          stats.filteredPoints++;
         }
       }
     });
@@ -281,7 +347,14 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     return validatedData;
   });
   
-  console.log('Data Quality Stats:', stats);
+  console.log('Merge results - Data Quality Stats:', {
+    totalPoints: stats.totalRawPoints,
+    validPoints: stats.validPoints,
+    filteredPoints: stats.filteredPoints,
+    buyBoxStats: stats.seriesStats.buyBox,
+    fbaStats: stats.seriesStats.fba
+  });
+  
   return { data: dataPoints, stats };
 };
 
@@ -354,7 +427,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   const [granularity, setGranularity] = useState('raw');
   const [chartMode, setChartMode] = useState<'price' | 'sales' | 'reviews'>('price');
   const [fillGaps, setFillGaps] = useState(false);
-  const [showDataStats, setShowDataStats] = useState(false);
+  const [showDataStats, setShowDataStats] = useState(true); // Default to true for debugging
   const [lineVisibility, setLineVisibility] = useState<LineVisibility>({
     amazonPrice: true,
     fbaPrice: true,
@@ -366,13 +439,14 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with enhanced validation and statistics
+  // Parse Keepa CSV data with enhanced validation and debugging
   const { chartData, dataStats } = useMemo(() => {
-    console.log('Processing chart data for product:', product.asin);
-    console.log('Product CSV data structure:', product.csv);
+    console.log('=== PROCESSING CHART DATA ===');
+    console.log('Product ASIN:', product.asin);
+    console.log('Product CSV structure:', Object.keys(product.csv || {}));
     
     if (!product.csv || typeof product.csv !== 'object') {
-      console.log('No CSV data found or invalid format');
+      console.log('ERROR: No CSV data found or invalid format');
       return { chartData: [], dataStats: null };
     }
 
@@ -396,43 +470,54 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     Object.entries(csvMapping).forEach(([fieldName, csvIndex]) => {
       const csvArray = product.csv[csvIndex];
       if (csvArray && Array.isArray(csvArray) && csvArray.length > 0) {
-        console.log(`Parsing ${fieldName} from CSV index ${csvIndex}, length:`, csvArray.length);
-        const { series } = parseCsvSeries(csvArray, fieldName);
+        console.log(`=== PARSING ${fieldName.toUpperCase()} (CSV[${csvIndex}]) ===`);
+        console.log(`Raw array length: ${csvArray.length}`);
+        const { series, stats } = parseCsvSeries(csvArray, fieldName);
         if (fieldName === 'offerCount') {
           offerCountSeries = series;
         } else {
           seriesData[fieldName] = series;
         }
+        console.log(`${fieldName} final result:`, Object.keys(series).length, 'data points');
       } else {
-        console.log(`No data for ${fieldName} at CSV index ${csvIndex}`);
+        console.log(`WARNING: No data for ${fieldName} at CSV index ${csvIndex}`);
       }
     });
     
     if (Object.keys(seriesData).length === 0) {
-      console.log('No valid series data found');
+      console.log('ERROR: No valid series data found after parsing');
       return { chartData: [], dataStats: null };
     }
     
     // Merge all series by timestamp with enhanced validation
+    console.log('=== MERGING SERIES DATA ===');
     const { data: mergedData, stats } = mergeSeriesByTimestamp(seriesData, offerCountSeries);
     
     if (mergedData.length === 0) {
+      console.log('ERROR: No merged data points created');
       return { chartData: [], dataStats: stats };
     }
     
-    // Apply enhanced price spike filtering
+    // Sort and apply price spike filtering (simplified for now)
     let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
-    filteredData = filterPriceSpikes(filteredData, 'buyBoxPrice');
-    filteredData = filterPriceSpikes(filteredData, 'amazonPrice');
-    filteredData = filterPriceSpikes(filteredData, 'fbaPrice');
-    filteredData = filterPriceSpikes(filteredData, 'fbmPrice');
     
-    console.log('Final processed data points:', filteredData.length);
-    console.log('Sample data points:', filteredData.slice(0, 3));
+    console.log('=== FINAL RESULTS ===');
+    console.log('Total processed data points:', filteredData.length);
+    console.log('Buy Box data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
+    console.log('FBA data points:', filteredData.filter(d => d.fbaPrice !== undefined).length);
     console.log('Date range:', {
       first: filteredData[0]?.timestamp,
       last: filteredData[filteredData.length - 1]?.timestamp
     });
+    
+    // Sample the first few valid data points for verification
+    const sampleData = filteredData.slice(0, 10).map(d => ({
+      date: d.formattedDate,
+      buyBox: d.buyBoxPrice,
+      fba: d.fbaPrice,
+      offers: d.offerCount
+    }));
+    console.log('Sample data points:', sampleData);
     
     return { chartData: filteredData, dataStats: stats };
   }, [product.csv, product.asin]);
@@ -539,12 +624,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               </p>
               {dataStats && (
                 <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  Data Quality: {dataStats.validPoints}/{dataStats.totalRawPoints} valid points
-                  {Object.entries(dataStats.seriesStats).map(([series, stats]) => (
-                    <div key={series}>
-                      {series}: {stats.validCount}/{stats.rawCount} valid
-                    </div>
-                  ))}
+                  <div>Data Quality: {dataStats.validPoints}/{dataStats.totalRawPoints} valid points</div>
+                  <div>Buy Box: {dataStats.seriesStats.buyBox?.validCount || 0}/{dataStats.seriesStats.buyBox?.rawCount || 0} valid</div>
+                  <div>FBA: {dataStats.seriesStats.fba?.validCount || 0}/{dataStats.seriesStats.fba?.rawCount || 0} valid</div>
                 </div>
               )}
               {chartData.length > 0 && (
@@ -651,23 +733,27 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       </CardHeader>
       
       <CardContent>
-        {/* Data Quality Statistics */}
+        {/* Enhanced Data Quality Statistics */}
         {showDataStats && dataStats && (
           <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
-            <h4 className="text-sm font-semibold mb-2">Data Quality Statistics</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <h4 className="text-sm font-semibold mb-2">Data Quality & Validation Results</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
               <div>Total Points: {dataStats.totalRawPoints}</div>
               <div>Valid Points: {dataStats.validPoints}</div>
               <div>Filtered: {dataStats.filteredPoints}</div>
               <div>Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</div>
             </div>
-            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-              {Object.entries(dataStats.seriesStats).map(([series, stats]) => (
-                <div key={series} className="bg-white dark:bg-slate-800 p-2 rounded">
-                  <div className="font-medium">{series}</div>
-                  <div>{stats.validCount}/{stats.rawCount} valid</div>
-                </div>
-              ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              <div className="bg-white dark:bg-slate-800 p-2 rounded">
+                <div className="font-medium text-blue-600">Buy Box Analysis</div>
+                <div>Valid: {dataStats.seriesStats.buyBox?.validCount || 0}/{dataStats.seriesStats.buyBox?.rawCount || 0}</div>
+                <div>Success Rate: {dataStats.seriesStats.buyBox?.rawCount ? Math.round((dataStats.seriesStats.buyBox.validCount / dataStats.seriesStats.buyBox.rawCount) * 100) : 0}%</div>
+              </div>
+              <div className="bg-white dark:bg-slate-800 p-2 rounded">
+                <div className="font-medium text-green-600">FBA Analysis</div>
+                <div>Valid: {dataStats.seriesStats.fba?.validCount || 0}/{dataStats.seriesStats.fba?.rawCount || 0}</div>
+                <div>Success Rate: {dataStats.seriesStats.fba?.rawCount ? Math.round((dataStats.seriesStats.fba.validCount / dataStats.seriesStats.fba.rawCount) * 100) : 0}%</div>
+              </div>
             </div>
           </div>
         )}
@@ -927,7 +1013,12 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
           Showing {filteredData.length} data points ({granularity} granularity) from Keepa API
           {dataStats && (
-            <span> | Data Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</span>
+            <>
+              <span> | Data Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</span>
+              <br />
+              <span>Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} points | </span>
+              <span>FBA: {filteredData.filter(d => d.fbaPrice !== undefined).length} points</span>
+            </>
           )}
           <br />
           Last updated: {product.last_updated ? new Date(product.last_updated).toLocaleString() : 'Unknown'}
