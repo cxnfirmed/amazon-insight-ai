@@ -82,53 +82,63 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   const chartData: ChartDataPoint[] = useMemo(() => {
     console.log('Processing chart data for product:', product.asin);
     console.log('Product CSV data:', product.csv);
-    console.log('Product debug data:', product.debug_data);
+    console.log('CSV data type:', typeof product.csv);
+    console.log('CSV data length:', product.csv?.length);
     
-    // Try to get CSV data from multiple possible locations
-    let csvData = null;
-    
-    // First try the direct csv field
-    if (product.csv && Array.isArray(product.csv) && product.csv.length > 0) {
-      csvData = product.csv;
-      console.log('Found CSV data in product.csv, length:', csvData.length);
-    }
-    // Fallback to debug_data
-    else if (product.debug_data?.data?.csv && Array.isArray(product.debug_data.data.csv)) {
-      csvData = product.debug_data.data.csv;
-      console.log('Found CSV data in debug_data.data.csv, length:', csvData.length);
-    }
-    // Another fallback
-    else if (product.debug_data?.csv && Array.isArray(product.debug_data.csv)) {
-      csvData = product.debug_data.csv;
-      console.log('Found CSV data in debug_data.csv, length:', csvData.length);
-    }
-    
-    if (!csvData || csvData.length === 0) {
+    if (!product.csv || !Array.isArray(product.csv) || product.csv.length === 0) {
       console.log('No CSV data found or empty array');
       return [];
     }
 
+    const csvData = product.csv;
     const stats = product.debug_data?.data?.stats || {};
     
-    console.log('Parsing CSV data, length:', csvData.length);
-    console.log('First few CSV items:', csvData.slice(0, 10));
+    console.log('Processing CSV data, length:', csvData.length);
+    console.log('First few CSV items:', csvData.slice(0, 5));
+    console.log('CSV data structure - first item:', csvData[0]);
     
     const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
     const dataPoints: ChartDataPoint[] = [];
     
-    // Process CSV data in pairs (timestamp, value)
-    for (let i = 0; i < csvData.length; i += 2) {
-      const timestampMinutes = csvData[i];
-      const values = csvData[i + 1];
+    // Updated parsing logic to handle the actual CSV structure
+    // Each CSV entry appears to be a complete data point, not alternating pairs
+    csvData.forEach((entry, index) => {
+      console.log(`Processing entry ${index}:`, entry);
       
-      if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
-        console.log('Invalid timestamp at index', i, ':', timestampMinutes);
-        continue;
+      // Handle different possible structures
+      let timestampMinutes, values;
+      
+      if (Array.isArray(entry)) {
+        // If entry is an array, first element should be timestamp
+        if (entry.length >= 2) {
+          timestampMinutes = entry[0];
+          values = entry.slice(1); // Rest of the array contains values
+        } else {
+          console.log('Invalid entry structure - array too short:', entry);
+          return;
+        }
+      } else if (typeof entry === 'object' && entry !== null) {
+        // If entry is an object, look for timestamp and values properties
+        timestampMinutes = entry.timestamp || entry[0];
+        values = entry.values || entry.slice?.(1) || [];
+      } else {
+        console.log('Invalid entry structure - not array or object:', entry);
+        return;
       }
       
-      if (!Array.isArray(values)) {
-        console.log('Invalid values array at index', i + 1, ':', values);
-        continue;
+      if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
+        console.log('Invalid timestamp at index', index, ':', timestampMinutes);
+        return;
+      }
+      
+      if (!Array.isArray(values) && typeof values !== 'object') {
+        console.log('Invalid values at index', index, ':', values);
+        return;
+      }
+      
+      // Convert to array if it's an object
+      if (typeof values === 'object' && !Array.isArray(values)) {
+        values = Object.values(values);
       }
       
       const timestampMs = keepaEpoch + (timestampMinutes * 60 * 1000);
@@ -136,30 +146,39 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       
       if (isNaN(date.getTime())) {
         console.log('Invalid date for timestamp:', timestampMinutes);
-        continue;
+        return;
       }
       
+      console.log(`Entry ${index} - timestamp: ${timestampMinutes}, values:`, values);
+      
       // Extract values from the array based on Keepa indices
+      // Handle both array and object structures
+      const getValue = (index: number) => {
+        const val = values[index];
+        return val !== null && val !== undefined && val !== -1 ? val : undefined;
+      };
+      
       const dataPoint: ChartDataPoint = {
         timestamp: date.toISOString(),
         timestampMs,
         formattedDate: date.toLocaleDateString(),
-        amazonPrice: values[0] && values[0] !== -1 ? values[0] / 100 : undefined,
-        fbaPrice: values[1] && values[1] !== -1 ? values[1] / 100 : undefined,
-        fbmPrice: values[3] && values[3] !== -1 ? values[3] / 100 : undefined,
-        buyBoxPrice: values[4] && values[4] !== -1 ? values[4] / 100 : undefined,
-        salesRank: values[5] && values[5] !== -1 ? values[5] : undefined,
-        offerCount: values[20] && values[20] !== -1 ? values[20] : undefined,
-        rating: values[42] && values[42] !== -1 ? values[42] / 10 : undefined,
-        reviewCount: values[44] && values[44] !== -1 ? values[44] : undefined,
+        amazonPrice: getValue(0) ? getValue(0) / 100 : undefined,
+        fbaPrice: getValue(1) ? getValue(1) / 100 : undefined,
+        fbmPrice: getValue(3) ? getValue(3) / 100 : undefined,
+        buyBoxPrice: getValue(4) ? getValue(4) / 100 : undefined,
+        salesRank: getValue(5),
+        offerCount: getValue(20),
+        rating: getValue(42) ? getValue(42) / 10 : undefined,
+        reviewCount: getValue(44),
         soldPastMonth: stats.sold30 || stats.buyBoxShipped30 || undefined
       };
       
+      console.log(`Generated data point ${index}:`, dataPoint);
       dataPoints.push(dataPoint);
-    }
+    });
     
-    console.log('Processed data points:', dataPoints.length);
-    console.log('Sample data points:', dataPoints.slice(0, 5));
+    console.log('Final processed data points:', dataPoints.length);
+    console.log('Sample data points:', dataPoints.slice(0, 3));
     return dataPoints.sort((a, b) => a.timestampMs - b.timestampMs);
   }, [product.csv, product.debug_data]);
 
@@ -220,7 +239,8 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 CSV data length: {product.csv?.length || 0} | 
-                Debug CSV: {product.debug_data?.data?.csv?.length || 0}
+                Debug CSV: {product.debug_data?.data?.csv?.length || 0} |
+                Processed points: {chartData.length}
               </p>
             </div>
           </div>
