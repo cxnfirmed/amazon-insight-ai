@@ -449,7 +449,7 @@ serve(async (req) => {
         asin: product.asin,
         title: product.title || 'Product title not available',
         manufacturer: product.manufacturer || null,
-        category: product.categoryTree?.[product.categoryTree.length - 1]?.name || 'Unknown',
+        category: product.categoryTree?.[0]?.name || 'Unknown Category',
         imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
         
         buyBoxPrice: currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null,
