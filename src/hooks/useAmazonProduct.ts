@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -237,6 +238,7 @@ export const useAmazonProduct = () => {
         asin: input,
         title: 'Error loading product',
         manufacturer: null,
+        brand: null,
         category: 'Unknown',
         image_url: null,
         buy_box_price: null,
