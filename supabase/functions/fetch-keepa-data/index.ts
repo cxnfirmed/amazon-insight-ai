@@ -330,19 +330,25 @@ serve(async (req) => {
     
     let amazonPrice = null;
     
-    // Use the correct Keepa API fields for Amazon price detection
-    if (product.isAmazon === true) {
-      console.log('✅ Amazon is a seller (isAmazon === true)');
+    // Check for Amazon price in stats.current[11] (Amazon's current price in cents)
+    if (currentStats[11] !== undefined && currentStats[11] !== null && currentStats[11] !== -1 && currentStats[11] > 0) {
+      amazonPrice = currentStats[11] / 100;
+      console.log('✅ Found Amazon price from stats.current[11]:', amazonPrice);
       
-      // Get Amazon price from stats.current[11] (in cents)
-      if (currentStats[11] !== undefined && currentStats[11] !== null && currentStats[11] !== -1 && currentStats[11] > 0) {
-        amazonPrice = currentStats[11] / 100;
-        console.log('✅ Found Amazon price from stats.current[11]:', amazonPrice);
+      // Additional validation: check if isAmazon is explicitly true
+      if (product.isAmazon === true) {
+        console.log('✅ Confirmed: Amazon is a seller (isAmazon === true)');
       } else {
-        console.log('❌ Amazon price not available or invalid in stats.current[11]:', currentStats[11]);
+        console.log('ℹ️ Amazon price found but isAmazon field is:', product.isAmazon);
       }
     } else {
-      console.log('❌ Amazon is not a seller (isAmazon !== true)');
+      console.log('❌ No valid Amazon price found in stats.current[11]:', currentStats[11]);
+      
+      if (product.isAmazon === true) {
+        console.log('⚠️ isAmazon is true but no valid price in stats.current[11]');
+      } else {
+        console.log('❌ Amazon is not a seller (isAmazon:', product.isAmazon, ')');
+      }
     }
     
     console.log('Final Amazon price decision:', amazonPrice);
