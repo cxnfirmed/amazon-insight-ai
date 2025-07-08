@@ -58,6 +58,14 @@ const Index = () => {
     }
   };
 
+  const handleViewChange = (view: string) => {
+    setActiveView(view);
+    // Clear search query when switching to Dashboard to show original dashboard content
+    if (view === 'Dashboard') {
+      setSearchQuery('');
+    }
+  };
+
   const renderActiveView = () => {
     console.log('Rendering active view:', activeView, 'Product:', product);
     
@@ -172,7 +180,7 @@ const Index = () => {
           open={sidebarOpen} 
           setOpen={setSidebarOpen}
           activeView={activeView}
-          setActiveView={setActiveView}
+          setActiveView={handleViewChange}
         />
         
         <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-16'}`}>
