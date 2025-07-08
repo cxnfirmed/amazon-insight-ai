@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -82,6 +83,27 @@ serve(async (req) => {
         const currentStats = product.stats?.current || {};
         console.log('Product current stats:', currentStats);
         
+        // Extract sales rank properly from salesRanks array
+        let salesRank = null;
+        if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
+          salesRank = product.salesRanks[0].current || null;
+        }
+        
+        // Extract offer count properly - use stats.current[2] or offerCountNew
+        let offerCount = 0;
+        if (currentStats[2] !== undefined && currentStats[2] !== -1) {
+          offerCount = currentStats[2];
+        } else if (product.offerCountNew !== undefined && product.offerCountNew !== -1) {
+          offerCount = product.offerCountNew;
+        }
+        
+        console.log('Extracted data:', {
+          salesRank,
+          offerCount,
+          salesRanksArray: product.salesRanks,
+          offerCountNew: product.offerCountNew
+        });
+        
         return new Response(JSON.stringify({
           success: true,
           data: {
@@ -103,10 +125,10 @@ serve(async (req) => {
               variableClosingFee: product.variableClosingFee ? product.variableClosingFee / 100 : null,
             },
             
-            offerCount: currentStats[2] || 0,
+            offerCount: offerCount,
             estimatedMonthlySales: product.monthlySold || null,
             inStock: currentStats[12] === 1,
-            salesRank: product.salesRanks?.[0]?.current || null,
+            salesRank: salesRank,
             
             priceHistory: [],
             
@@ -125,14 +147,21 @@ serve(async (req) => {
       }
 
       // Multiple products found - return selection list
-      const productChoices = upcData.products.slice(0, 10).map(product => ({
-        asin: product.asin,
-        title: product.title || 'Unknown Product',
-        monthlySales: product.monthlySold || 0,
-        salesRank: product.salesRanks?.[0]?.current || null,
-        imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
-        price: product.stats?.current?.[0] !== undefined && product.stats.current[0] !== -1 ? product.stats.current[0] / 100 : null
-      }));
+      const productChoices = upcData.products.slice(0, 10).map(product => {
+        let salesRank = null;
+        if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
+          salesRank = product.salesRanks[0].current || null;
+        }
+        
+        return {
+          asin: product.asin,
+          title: product.title || 'Unknown Product',
+          monthlySales: product.monthlySold || 0,
+          salesRank: salesRank,
+          imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
+          price: product.stats?.current?.[0] !== undefined && product.stats.current[0] !== -1 ? product.stats.current[0] / 100 : null
+        };
+      });
       
       return new Response(JSON.stringify({
         success: true,
@@ -185,6 +214,8 @@ serve(async (req) => {
     const product = data.products[0];
     console.log('Raw product data keys:', Object.keys(product));
     console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
+    console.log('Product salesRanks:', product.salesRanks);
+    console.log('Product offerCountNew:', product.offerCountNew);
     
     // Extract current prices from the stats object - fix the access pattern
     const currentStats = product.stats?.current || {};
@@ -195,8 +226,22 @@ serve(async (req) => {
     const lowestFBAPrice = currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null;
     const lowestFBMPrice = currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null;
     const amazonPrice = currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null;
-    const offerCount = currentStats[2] || 0;
     const inStock = currentStats[12] === 1;
+    
+    // Extract sales rank properly from salesRanks array
+    let salesRank = null;
+    if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
+      // Get the first (primary) sales rank
+      salesRank = product.salesRanks[0].current || null;
+    }
+    
+    // Extract offer count properly - use stats.current[2] or offerCountNew
+    let offerCount = 0;
+    if (currentStats[2] !== undefined && currentStats[2] !== -1) {
+      offerCount = currentStats[2];
+    } else if (product.offerCountNew !== undefined && product.offerCountNew !== -1) {
+      offerCount = product.offerCountNew;
+    }
     
     console.log('Extracted pricing data:', {
       buyBoxPrice,
@@ -204,7 +249,8 @@ serve(async (req) => {
       lowestFBMPrice,
       amazonPrice,
       offerCount,
-      inStock
+      inStock,
+      salesRank
     });
     
     // Helper function to safely process price history
@@ -277,7 +323,7 @@ serve(async (req) => {
         offerCount,
         estimatedMonthlySales: product.monthlySold || null,
         inStock,
-        salesRank: product.salesRanks?.[0]?.current || null,
+        salesRank: salesRank,
         
         priceHistory: processPriceHistory(product.csv),
         
