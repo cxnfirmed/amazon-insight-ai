@@ -43,6 +43,19 @@ interface ParsedSeries {
   [timestamp: number]: number;
 }
 
+interface DataQualityStats {
+  totalRawPoints: number;
+  validPoints: number;
+  filteredPoints: number;
+  seriesStats: {
+    [key: string]: {
+      rawCount: number;
+      validCount: number;
+      filteredCount: number;
+    };
+  };
+}
+
 const TIME_RANGES = [
   { value: '1d', label: 'Day', days: 1 },
   { value: '1w', label: 'Week', days: 7 },
@@ -73,30 +86,31 @@ const COLOR_SCHEME = {
 // Keepa epoch: January 1, 2011 00:00:00 UTC
 const KEEPA_EPOCH = new Date('2011-01-01T00:00:00.000Z').getTime();
 
-// Price validation
+// Enhanced price validation functions
 const isValidPrice = (price: number): boolean => {
-  return price > 0.01 && price < 10000;
+  return typeof price === 'number' && price > 0.01 && price < 10000;
 };
 
-// Parse individual CSV series into timestamp-value pairs
-const parseCsvSeries = (csvArray: number[]): ParsedSeries => {
-  const series: ParsedSeries = {};
-  
-  if (!Array.isArray(csvArray) || csvArray.length < 2) {
-    return series;
+const isValidBuyBoxPrice = (price: number, offerCount: number, recentMedian?: number): boolean => {
+  if (!isValidPrice(price) || offerCount <= 0) {
+    return false;
   }
   
-  // Parse alternating [timestamp, value, timestamp, value, ...] format
-  for (let i = 0; i < csvArray.length - 1; i += 2) {
-    const timestampMinutes = csvArray[i];
-    const value = csvArray[i + 1];
-    
-    if (typeof timestampMinutes === 'number' && typeof value === 'number' && value !== -1) {
-      series[timestampMinutes] = value;
+  // If we have recent median data, check for extreme spikes
+  if (recentMedian && recentMedian > 0) {
+    const spikeThreshold = 2.5;
+    if (price > recentMedian * spikeThreshold && offerCount < 2) {
+      console.log(`Filtering Buy Box spike: $${price.toFixed(2)} vs median $${recentMedian.toFixed(2)}, offers: ${offerCount}`);
+      return false;
     }
   }
   
-  return series;
+  return true;
+};
+
+const isValidFbaFbmPrice = (price: number): boolean => {
+  // More relaxed validation for FBA/FBM to preserve sparse data
+  return typeof price === 'number' && price > 0.01 && price < 50000;
 };
 
 // Convert Keepa timestamp to JavaScript timestamp
@@ -104,8 +118,97 @@ const keepaTimeToMs = (keepaMinutes: number): number => {
   return KEEPA_EPOCH + (keepaMinutes * 60 * 1000);
 };
 
-// Merge multiple series by timestamp
-const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }): ChartDataPoint[] => {
+// Parse individual CSV series into timestamp-value pairs with validation
+const parseCsvSeries = (csvArray: number[], seriesType: string): { series: ParsedSeries; stats: { rawCount: number; validCount: number; filteredCount: number } } => {
+  const series: ParsedSeries = {};
+  const stats = { rawCount: 0, validCount: 0, filteredCount: 0 };
+  
+  if (!Array.isArray(csvArray) || csvArray.length < 2) {
+    return { series, stats };
+  }
+  
+  stats.rawCount = Math.floor(csvArray.length / 2);
+  
+  // Parse alternating [timestamp, value, timestamp, value, ...] format
+  for (let i = 0; i < csvArray.length - 1; i += 2) {
+    const timestampMinutes = csvArray[i];
+    const value = csvArray[i + 1];
+    
+    if (typeof timestampMinutes === 'number' && typeof value === 'number' && value !== -1) {
+      // Convert price values (divide by 100) except for non-price fields
+      let processedValue = value;
+      if (['amazon', 'fba', 'fbm', 'buyBox'].includes(seriesType)) {
+        processedValue = value / 100;
+      } else if (seriesType === 'rating') {
+        processedValue = value / 10;
+      }
+      
+      series[timestampMinutes] = processedValue;
+      stats.validCount++;
+    } else {
+      stats.filteredCount++;
+    }
+  }
+  
+  console.log(`Parsed ${seriesType} series: ${stats.rawCount} raw points, ${stats.validCount} valid, ${stats.filteredCount} filtered`);
+  return { series, stats };
+};
+
+// Enhanced median calculation for price spike detection
+const calculateMedian = (values: number[]): number => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+};
+
+// Enhanced price spike filtering with median-based detection
+const filterPriceSpikes = (data: ChartDataPoint[], field: keyof ChartDataPoint): ChartDataPoint[] => {
+  if (data.length < 5) return data;
+  
+  // Calculate recent median for context
+  const recentValues = data.slice(-20).map(point => point[field] as number).filter(v => v && !isNaN(v));
+  const recentMedian = calculateMedian(recentValues);
+  
+  return data.map((point, index) => {
+    const value = point[field] as number;
+    if (!value || isNaN(value)) return point;
+    
+    // Different spike detection logic for different fields
+    if (field === 'buyBoxPrice') {
+      // For Buy Box, use offer count context
+      const offerCount = point.offerCount || 0;
+      if (!isValidBuyBoxPrice(value, offerCount, recentMedian)) {
+        console.log(`Filtering Buy Box spike at ${point.formattedDate}: $${value.toFixed(2)}, offers: ${offerCount}`);
+        return { ...point, [field]: undefined };
+      }
+    } else if (['amazonPrice', 'fbaPrice', 'fbmPrice'].includes(field as string)) {
+      // For other prices, use contextual spike detection
+      const prevPoint = index > 0 ? data[index - 1] : null;
+      const nextPoint = index < data.length - 1 ? data[index + 1] : null;
+      
+      const prevValue = prevPoint?.[field] as number;
+      const nextValue = nextPoint?.[field] as number;
+      
+      // If current value is 5x+ different from both neighbors and median, it's likely a spike
+      if (prevValue && nextValue && recentMedian > 0) {
+        const avgNeighbor = (prevValue + nextValue) / 2;
+        const spikeThreshold = 5;
+        
+        if ((value > avgNeighbor * spikeThreshold || value < avgNeighbor / spikeThreshold) &&
+            (value > recentMedian * spikeThreshold || value < recentMedian / spikeThreshold)) {
+          console.log(`Filtering ${field} spike at ${point.formattedDate}: $${value.toFixed(2)} vs median $${recentMedian.toFixed(2)}`);
+          return { ...point, [field]: undefined };
+        }
+      }
+    }
+    
+    return point;
+  });
+};
+
+// Merge multiple series by timestamp with enhanced validation
+const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, offerCountSeries: ParsedSeries): { data: ChartDataPoint[]; stats: DataQualityStats } => {
   // Collect all unique timestamps
   const allTimestamps = new Set<number>();
   
@@ -118,7 +221,19 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }): Ch
   // Sort timestamps
   const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
   
-  // Create merged data points
+  const stats: DataQualityStats = {
+    totalRawPoints: sortedTimestamps.length,
+    validPoints: 0,
+    filteredPoints: 0,
+    seriesStats: {}
+  };
+  
+  // Initialize series stats
+  Object.keys(seriesData).forEach(key => {
+    stats.seriesStats[key] = { rawCount: 0, validCount: 0, filteredCount: 0 };
+  });
+  
+  // Create merged data points with enhanced validation
   const dataPoints: ChartDataPoint[] = sortedTimestamps.map(keepaTimestamp => {
     const timestampMs = keepaTimeToMs(keepaTimestamp);
     const date = new Date(timestampMs);
@@ -129,55 +244,45 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }): Ch
     const fbmPrice = seriesData.fbm?.[keepaTimestamp];
     const buyBoxPrice = seriesData.buyBox?.[keepaTimestamp];
     const salesRank = seriesData.salesRank?.[keepaTimestamp];
-    const offerCount = seriesData.offerCount?.[keepaTimestamp];
+    const offerCount = offerCountSeries[keepaTimestamp];
     const rating = seriesData.rating?.[keepaTimestamp];
     const reviewCount = seriesData.reviewCount?.[keepaTimestamp];
     
-    return {
+    // Apply validation with series-specific logic
+    const validatedData = {
       timestamp: date.toISOString(),
       timestampMs,
       formattedDate: date.toLocaleDateString(),
-      // Convert prices (divide by 100) and validate
-      amazonPrice: amazonPrice ? (isValidPrice(amazonPrice / 100) ? amazonPrice / 100 : undefined) : undefined,
-      fbaPrice: fbaPrice ? (isValidPrice(fbaPrice / 100) ? fbaPrice / 100 : undefined) : undefined,
-      fbmPrice: fbmPrice ? (isValidPrice(fbmPrice / 100) ? fbmPrice / 100 : undefined) : undefined,
-      buyBoxPrice: buyBoxPrice ? (isValidPrice(buyBoxPrice / 100) ? buyBoxPrice / 100 : undefined) : undefined,
-      // Keep non-price values as-is
+      amazonPrice: amazonPrice && isValidPrice(amazonPrice) ? amazonPrice : undefined,
+      fbaPrice: fbaPrice && isValidFbaFbmPrice(fbaPrice) ? fbaPrice : undefined,
+      fbmPrice: fbmPrice && isValidFbaFbmPrice(fbmPrice) ? fbmPrice : undefined,
+      buyBoxPrice: buyBoxPrice && offerCount !== undefined && isValidBuyBoxPrice(buyBoxPrice, offerCount) ? buyBoxPrice : undefined,
       salesRank: salesRank || undefined,
       offerCount: offerCount || undefined,
-      rating: rating ? rating / 10 : undefined, // Rating is stored as 50 = 5.0 stars
+      rating: rating || undefined,
       reviewCount: reviewCount || undefined
     };
-  });
-  
-  return dataPoints;
-};
-
-// Filter price spikes
-const filterPriceSpikes = (data: ChartDataPoint[], field: keyof ChartDataPoint): ChartDataPoint[] => {
-  if (data.length < 3) return data;
-  
-  return data.map((point, index) => {
-    const value = point[field] as number;
-    if (!value || isNaN(value)) return point;
     
-    // Check surrounding points for context
-    const prevPoint = index > 0 ? data[index - 1] : null;
-    const nextPoint = index < data.length - 1 ? data[index + 1] : null;
-    
-    const prevValue = prevPoint?.[field] as number;
-    const nextValue = nextPoint?.[field] as number;
-    
-    // If current value is 10x+ different from both neighbors, it's likely a spike
-    if (prevValue && nextValue) {
-      const avgNeighbor = (prevValue + nextValue) / 2;
-      if (value > avgNeighbor * 10 || value < avgNeighbor / 10) {
-        return { ...point, [field]: undefined };
+    // Update stats
+    ['amazonPrice', 'fbaPrice', 'fbmPrice', 'buyBoxPrice'].forEach(field => {
+      const key = field.replace('Price', '');
+      if (stats.seriesStats[key]) {
+        stats.seriesStats[key].rawCount++;
+        if (validatedData[field as keyof typeof validatedData]) {
+          stats.seriesStats[key].validCount++;
+          stats.validPoints++;
+        } else {
+          stats.seriesStats[key].filteredCount++;
+          stats.filteredPoints++;
+        }
       }
-    }
+    });
     
-    return point;
+    return validatedData;
   });
+  
+  console.log('Data Quality Stats:', stats);
+  return { data: dataPoints, stats };
 };
 
 // Data aggregation functions
@@ -249,6 +354,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   const [granularity, setGranularity] = useState('raw');
   const [chartMode, setChartMode] = useState<'price' | 'sales' | 'reviews'>('price');
   const [fillGaps, setFillGaps] = useState(false);
+  const [showDataStats, setShowDataStats] = useState(false);
   const [lineVisibility, setLineVisibility] = useState<LineVisibility>({
     amazonPrice: true,
     fbaPrice: true,
@@ -260,18 +366,19 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with correct multi-series structure
-  const chartData: ChartDataPoint[] = useMemo(() => {
+  // Parse Keepa CSV data with enhanced validation and statistics
+  const { chartData, dataStats } = useMemo(() => {
     console.log('Processing chart data for product:', product.asin);
     console.log('Product CSV data structure:', product.csv);
     
     if (!product.csv || typeof product.csv !== 'object') {
       console.log('No CSV data found or invalid format');
-      return [];
+      return { chartData: [], dataStats: null };
     }
 
-    // Parse each CSV series separately
+    // Parse each CSV series separately with enhanced validation
     const seriesData: { [key: string]: ParsedSeries } = {};
+    let offerCountSeries: ParsedSeries = {};
     
     // Map Keepa CSV indices to our data fields
     const csvMapping = {
@@ -285,42 +392,40 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       reviewCount: 45   // Review count
     };
     
-    // Parse each available series
+    // Parse each available series with detailed logging
     Object.entries(csvMapping).forEach(([fieldName, csvIndex]) => {
       const csvArray = product.csv[csvIndex];
       if (csvArray && Array.isArray(csvArray) && csvArray.length > 0) {
         console.log(`Parsing ${fieldName} from CSV index ${csvIndex}, length:`, csvArray.length);
-        seriesData[fieldName] = parseCsvSeries(csvArray);
-        console.log(`Parsed ${fieldName} data points:`, Object.keys(seriesData[fieldName]).length);
+        const { series } = parseCsvSeries(csvArray, fieldName);
+        if (fieldName === 'offerCount') {
+          offerCountSeries = series;
+        } else {
+          seriesData[fieldName] = series;
+        }
       } else {
         console.log(`No data for ${fieldName} at CSV index ${csvIndex}`);
       }
     });
     
-    // Log parsed series summary
-    console.log('Parsed series summary:', Object.entries(seriesData).map(([key, data]) => 
-      `${key}: ${Object.keys(data).length} points`
-    ).join(', '));
-    
     if (Object.keys(seriesData).length === 0) {
       console.log('No valid series data found');
-      return [];
+      return { chartData: [], dataStats: null };
     }
     
-    // Merge all series by timestamp
-    const mergedData = mergeSeriesByTimestamp(seriesData);
-    console.log('Merged data points:', mergedData.length);
+    // Merge all series by timestamp with enhanced validation
+    const { data: mergedData, stats } = mergeSeriesByTimestamp(seriesData, offerCountSeries);
     
     if (mergedData.length === 0) {
-      return [];
+      return { chartData: [], dataStats: stats };
     }
     
-    // Filter price spikes for each price field
+    // Apply enhanced price spike filtering
     let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
+    filteredData = filterPriceSpikes(filteredData, 'buyBoxPrice');
     filteredData = filterPriceSpikes(filteredData, 'amazonPrice');
     filteredData = filterPriceSpikes(filteredData, 'fbaPrice');
     filteredData = filterPriceSpikes(filteredData, 'fbmPrice');
-    filteredData = filterPriceSpikes(filteredData, 'buyBoxPrice');
     
     console.log('Final processed data points:', filteredData.length);
     console.log('Sample data points:', filteredData.slice(0, 3));
@@ -329,7 +434,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       last: filteredData[filteredData.length - 1]?.timestamp
     });
     
-    return filteredData;
+    return { chartData: filteredData, dataStats: stats };
   }, [product.csv, product.asin]);
 
   // Apply granularity aggregation
@@ -394,15 +499,20 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     return null;
   };
 
-  // Debug information for CSV structure
-  const getDebugInfo = () => {
-    const csvKeys = product.csv ? Object.keys(product.csv) : [];
-    const csvSummary = csvKeys.map(key => {
-      const arr = product.csv[key];
-      return `${key}: ${Array.isArray(arr) ? arr.length : 'invalid'} items`;
-    }).join(', ');
+  // Generate data quality badge
+  const getDataQualityBadge = () => {
+    if (!dataStats) return null;
     
-    return `CSV structure - Keys: [${csvKeys.join(', ')}] | ${csvSummary}`;
+    const qualityScore = dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1);
+    const qualityColor = qualityScore > 0.8 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                         qualityScore > 0.5 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                         'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+    
+    return (
+      <Badge variant="secondary" className={qualityColor}>
+        {Math.round(qualityScore * 100)}% Data Quality
+      </Badge>
+    );
   };
 
   if (!filteredData.length) {
@@ -427,9 +537,16 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                 Time range: {timeRange} | 
                 Granularity: {granularity}
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                {getDebugInfo()}
-              </p>
+              {dataStats && (
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                  Data Quality: {dataStats.validPoints}/{dataStats.totalRawPoints} valid points
+                  {Object.entries(dataStats.seriesStats).map(([series, stats]) => (
+                    <div key={series}>
+                      {series}: {stats.validCount}/{stats.rawCount} valid
+                    </div>
+                  ))}
+                </div>
+              )}
               {chartData.length > 0 && (
                 <div className="flex gap-2 justify-center mt-2">
                   <Button
@@ -465,6 +582,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
                 Live Keepa Data ({filteredData.length} points)
               </Badge>
+              {getDataQualityBadge()}
             </CardTitle>
             
             {/* Time Range Controls */}
@@ -518,11 +636,42 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               />
               <Label htmlFor="fill-gaps" className="text-sm">Fill Gaps</Label>
             </div>
+            
+            {/* Data Stats Toggle */}
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="show-stats"
+                checked={showDataStats}
+                onCheckedChange={setShowDataStats}
+              />
+              <Label htmlFor="show-stats" className="text-sm">Show Stats</Label>
+            </div>
           </div>
         </div>
       </CardHeader>
       
       <CardContent>
+        {/* Data Quality Statistics */}
+        {showDataStats && dataStats && (
+          <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
+            <h4 className="text-sm font-semibold mb-2">Data Quality Statistics</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div>Total Points: {dataStats.totalRawPoints}</div>
+              <div>Valid Points: {dataStats.validPoints}</div>
+              <div>Filtered: {dataStats.filteredPoints}</div>
+              <div>Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              {Object.entries(dataStats.seriesStats).map(([series, stats]) => (
+                <div key={series} className="bg-white dark:bg-slate-800 p-2 rounded">
+                  <div className="font-medium">{series}</div>
+                  <div>{stats.validCount}/{stats.rawCount} valid</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Line Visibility Controls */}
         <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
@@ -774,9 +923,13 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
           </ResponsiveContainer>
         </div>
         
-        {/* Chart Info */}
+        {/* Enhanced Chart Info */}
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} data points ({granularity} granularity) from Keepa API | 
+          Showing {filteredData.length} data points ({granularity} granularity) from Keepa API
+          {dataStats && (
+            <span> | Data Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</span>
+          )}
+          <br />
           Last updated: {product.last_updated ? new Date(product.last_updated).toLocaleString() : 'Unknown'}
         </div>
       </CardContent>
