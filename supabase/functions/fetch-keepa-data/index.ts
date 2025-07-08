@@ -323,7 +323,7 @@ serve(async (req) => {
     console.log('Final stock status:', inStock);
     console.log('=== END STOCK STATUS DETERMINATION ===');
     
-    // AMAZON PRICE DETECTION - Fix the logic to properly identify Amazon as seller
+    // AMAZON PRICE DETECTION - Updated logic to properly identify Amazon as seller
     console.log('=== AMAZON PRICE DETECTION DEBUG ===');
     console.log('Buy box seller ID:', product.buyBoxSellerId);
     console.log('Buy box is Amazon:', product.buyBoxIsAmazon);
@@ -338,22 +338,58 @@ serve(async (req) => {
     }
     
     // Method 2: Check live offers for Amazon seller ID
-    if (!amazonPrice && product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
-      for (const offer of product.liveOffersOrder) {
+    if (!amazonPrice && product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.offers) {
+      for (const offerId of product.liveOffersOrder) {
+        const offer = product.offers[offerId];
         if (offer && offer.sellerId === 'ATVPDKIKX0DER') {
-          amazonPrice = offer.price ? offer.price / 100 : null;
-          console.log('Found Amazon offer in live offers, price:', amazonPrice);
-          break;
+          // Extract price from offerCSV (3rd-to-last value)
+          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
+            const priceIndex = offer.offerCSV.length - 3;
+            const rawPrice = offer.offerCSV[priceIndex];
+            if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
+              amazonPrice = rawPrice / 100;
+              console.log('Found Amazon offer in live offers, price:', amazonPrice);
+              break;
+            }
+          }
         }
       }
     }
     
-    // Method 3: Check if Amazon price is available in stats (this would be Amazon direct, not FBA)
-    // Only use this if we haven't found Amazon in buy box or live offers
-    if (!amazonPrice) {
-      // Check if there's a specific Amazon price field that's different from FBA prices
-      // This is tricky without clear documentation, so we'll be conservative
-      console.log('No Amazon seller found in buy box or live offers');
+    // Method 3: Check if Amazon is fulfilling FBA orders (Amazon as fulfiller)
+    if (!amazonPrice && product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.offers) {
+      for (const offerId of product.liveOffersOrder) {
+        const offer = product.offers[offerId];
+        // Check if this is an FBA offer (Amazon fulfillment) and has a reasonable price
+        if (offer && (offer.isFBA === true || offer.isFBA === 1)) {
+          // For FBA offers, Amazon is the fulfiller even if not the seller
+          // Check if this could be considered "sold by Amazon" (FBA with reasonable stock)
+          const hasStock = !offer.stockQty || offer.stockQty > 0 || 
+                          !offer.availableQty || offer.availableQty > 0;
+          
+          if (hasStock && offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
+            const priceIndex = offer.offerCSV.length - 3;
+            const rawPrice = offer.offerCSV[priceIndex];
+            if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
+              // Only consider this as Amazon price if it's the buy box price or very close to it
+              const fbaPrice = rawPrice / 100;
+              const buyBoxPrice = currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null;
+              
+              if (buyBoxPrice && Math.abs(fbaPrice - buyBoxPrice) < 0.01) {
+                amazonPrice = fbaPrice;
+                console.log('Found Amazon FBA offer matching buy box price:', amazonPrice);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Method 4: Check stats.current[16] for Amazon price (if available)
+    if (!amazonPrice && currentStats[16] !== undefined && currentStats[16] !== null && currentStats[16] !== -1) {
+      amazonPrice = currentStats[16] / 100;
+      console.log('Found Amazon price from stats.current[16]:', amazonPrice);
     }
     
     console.log('Final Amazon price decision:', amazonPrice);
