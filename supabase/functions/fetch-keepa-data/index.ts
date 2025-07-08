@@ -183,12 +183,45 @@ serve(async (req) => {
     
     console.log('Final sales rank decision:', salesRank);
 
-    // IMPROVED FBA PRICE CALCULATION - Calculate from offers array
+    // IMPROVED FBA PRICE CALCULATION - Get lowest priced live FBA offer
     console.log('=== FBA PRICE CALCULATION ===');
     let lowestFBAPrice = null;
     
-    if (product.offers && Array.isArray(product.offers)) {
-      console.log('Found offers array with', product.offers.length, 'offers');
+    // First check live offers for current FBA prices
+    if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
+      console.log('Found liveOffersOrder array with', product.liveOffersOrder.length, 'live offers');
+      
+      const validFBAPrices = [];
+      
+      for (let i = 0; i < product.liveOffersOrder.length; i++) {
+        const liveOffer = product.liveOffersOrder[i];
+        console.log(`Checking live offer ${i}:`, {
+          isFBA: liveOffer.isFBA,
+          condition: liveOffer.condition,
+          price: liveOffer.price,
+          isShippable: liveOffer.isShippable
+        });
+        
+        // Check if this is a live FBA offer with new condition
+        if (liveOffer.isFBA === true && liveOffer.condition === 1 && liveOffer.price && liveOffer.price > 0) {
+          const priceInDollars = liveOffer.price / 100;
+          validFBAPrices.push(priceInDollars);
+          console.log(`Found valid live FBA offer ${i}: $${priceInDollars}`);
+        }
+      }
+      
+      if (validFBAPrices.length > 0) {
+        lowestFBAPrice = Math.min(...validFBAPrices);
+        console.log('Calculated lowest FBA price from live offers:', lowestFBAPrice);
+        console.log('All valid FBA prices found:', validFBAPrices);
+      } else {
+        console.log('No valid live FBA offers found');
+      }
+    }
+    
+    // If no live offers found, check the offers array for FBA prices
+    if (lowestFBAPrice === null && product.offers && Array.isArray(product.offers)) {
+      console.log('No live FBA offers found, checking offers array with', product.offers.length, 'offers');
       
       const validFBAPrices = [];
       
@@ -197,45 +230,24 @@ serve(async (req) => {
         console.log(`Checking offer ${i}:`, {
           isFBA: offer.isFBA,
           condition: offer.condition,
-          offerCSV: offer.offerCSV ? `Array length: ${offer.offerCSV.length}` : 'No CSV data',
-          fullOfferCSV: offer.offerCSV ? offer.offerCSV.slice(-10) : 'No CSV data' // Show last 10 values for debugging
+          hasOfferCSV: !!offer.offerCSV
         });
         
         // Check if this is an FBA offer with new condition
-        if (offer.isFBA === true && offer.condition === 1) {
-          console.log(`Found FBA offer ${i} with new condition`);
+        if (offer.isFBA === true && offer.condition === 1 && offer.offerCSV && Array.isArray(offer.offerCSV)) {
+          console.log(`Offer ${i} CSV data length:`, offer.offerCSV.length);
           
-          // Extract the most recent price from offerCSV
-          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length > 0) {
-            // The offerCSV array contains [timestamp, price, shipping] triplets
-            // We need to find the most recent price entry
-            console.log(`Offer ${i} CSV data (last 10):`, offer.offerCSV.slice(-10));
+          // Get the most recent price from the offerCSV array
+          // The last 3 values should be: [timestamp, price, shipping]
+          if (offer.offerCSV.length >= 3) {
+            const price = offer.offerCSV[offer.offerCSV.length - 2]; // Second to last value is price
             
-            // Look for the most recent valid price
-            // Work backwards through the array looking for valid price entries
-            for (let j = offer.offerCSV.length - 1; j >= 1; j -= 3) {
-              const price = offer.offerCSV[j - 1]; // Price is the middle value in each triplet
-              
-              if (typeof price === 'number' && price > 0 && price < 1000000) { // Reasonable price range
-                const priceInDollars = price / 100; // Convert from cents to dollars
-                validFBAPrices.push(priceInDollars);
-                console.log(`Found valid FBA price from offer ${i}: $${priceInDollars} (raw: ${price})`);
-                break; // Use the most recent valid price
-              }
-            }
-            
-            // Fallback: if no valid price found in the structured way, try the simple approach
-            if (validFBAPrices.length === 0) {
-              // Try to find any reasonable price value in the array
-              for (let k = offer.offerCSV.length - 1; k >= 0; k--) {
-                const value = offer.offerCSV[k];
-                if (typeof value === 'number' && value > 100 && value < 1000000) { // Reasonable price range in cents
-                  const priceInDollars = value / 100;
-                  validFBAPrices.push(priceInDollars);
-                  console.log(`Fallback: Found valid FBA price from offer ${i}: $${priceInDollars} (raw: ${value})`);
-                  break;
-                }
-              }
+            if (typeof price === 'number' && price > 100 && price < 1000000) { // Reasonable price range in cents
+              const priceInDollars = price / 100;
+              validFBAPrices.push(priceInDollars);
+              console.log(`Found valid FBA price from offer ${i}: $${priceInDollars} (raw: ${price})`);
+            } else {
+              console.log(`Invalid price found in offer ${i}:`, price);
             }
           }
         }
@@ -246,28 +258,7 @@ serve(async (req) => {
         console.log('Calculated lowest FBA price from offers:', lowestFBAPrice);
         console.log('All valid FBA prices found:', validFBAPrices);
       } else {
-        console.log('No valid FBA offers found with new condition');
-      }
-    } else {
-      console.log('No offers array found, falling back to stats approach');
-    }
-    
-    // If no valid FBA price found from offers array, fallback to stats but with better logic
-    if (lowestFBAPrice === null) {
-      console.log('No FBA price found from offers, checking stats for FBA price indicators');
-      
-      // Check multiple stat indices that might contain FBA prices
-      const fbaStatIndices = [16, 17, 18]; // Common indices for FBA-related prices
-      
-      for (const index of fbaStatIndices) {
-        if (currentStats[index] !== undefined && currentStats[index] !== null && currentStats[index] !== -1) {
-          const potentialPrice = currentStats[index] / 100;
-          if (potentialPrice > 1 && potentialPrice < 10000) { // Reasonable price range
-            lowestFBAPrice = potentialPrice;
-            console.log(`Found FBA price from stats.current[${index}]:`, lowestFBAPrice);
-            break;
-          }
-        }
+        console.log('No valid FBA offers found in offers array');
       }
     }
     
