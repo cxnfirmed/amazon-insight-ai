@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,9 +18,9 @@ import {
   Info
 } from 'lucide-react';
 import { AmazonProduct, useAmazonProduct } from '@/hooks/useAmazonProduct';
-import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
 import { KeepaFeeCalculator } from '@/components/KeepaFeeCalculator';
 import { StarRating } from '@/components/StarRating';
+import { KeepaInteractiveChart } from '@/components/KeepaInteractiveChart';
 
 interface AmazonProductAnalyticsProps {
   product: AmazonProduct;
@@ -320,10 +319,10 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            {/* Keepa Price History Chart */}
-            <EnhancedPriceHistoryChart 
+            {/* Replace EnhancedPriceHistoryChart with KeepaInteractiveChart */}
+            <KeepaInteractiveChart 
               product={product}
-              title="Keepa Price & Sales History"
+              title="Interactive Keepa Price & Sales History"
             />
             
             {/* Keepa Fee Calculator */}

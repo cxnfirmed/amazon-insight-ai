@@ -142,26 +142,24 @@ serve(async (req) => {
     // Process single product result
     const product = data.products[0];
     console.log('Processing product:', product.asin);
-    console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
-    console.log('Product stats current:', product.stats?.current);
-    console.log('Product liveOffersOrder:', product.liveOffersOrder ? product.liveOffersOrder.length : 'No live offers order');
-    console.log('Product offers object:', product.offers ? Object.keys(product.offers).length : 'No offers object');
     
-    // DETAILED DEBUGGING FOR SALES RANK
-    console.log('=== SALES RANK DEBUGGING ===');
-    console.log('Full product object keys:', Object.keys(product));
-    console.log('Product stats object:', product.stats);
-    console.log('Product stats.current full array:', product.stats?.current);
-    console.log('Product stats.current[0] (Amazon sales rank):', product.stats?.current?.[0]);
-    console.log('Product stats.current[3] (Current sales rank):', product.stats?.current?.[3]);
+    // Enhanced CSV data logging for chart functionality
+    console.log('=== CSV DATA STRUCTURE FOR CHART ===');
+    console.log('Product csv array exists:', !!product.csv);
     console.log('Product csv array length:', product.csv?.length);
-    console.log('Product csv first 10 items:', product.csv?.slice(0, 10));
-    console.log('Product csv last 10 items:', product.csv?.slice(-10));
-    console.log('Product salesRanks array:', product.salesRanks);
-    console.log('Product lastUpdate:', product.lastUpdate);
-    console.log('Product lastRankUpdate:', product.lastRankUpdate);
-    console.log('=== END SALES RANK DEBUGGING ===');
-    
+    if (product.csv && product.csv.length > 0) {
+      console.log('First 20 CSV items:', product.csv.slice(0, 20));
+      console.log('CSV data structure - timestamps and values should alternate');
+      
+      // Log sample data points for verification
+      for (let i = 0; i < Math.min(10, product.csv.length); i += 2) {
+        const timestamp = product.csv[i];
+        const values = product.csv[i + 1];
+        console.log(`CSV[${i}] timestamp: ${timestamp}, values array:`, values);
+      }
+    }
+    console.log('=== END CSV DATA STRUCTURE ===');
+
     // Extract current prices from the stats object
     const currentStats = product.stats?.current || {};
     console.log('Current stats raw:', currentStats);
@@ -421,25 +419,24 @@ serve(async (req) => {
       liveOffersCount: product.liveOffersOrder?.length || 0
     });
     
-    // Helper function to safely process price history
-    const processPriceHistory = (csvData) => {
+    // Enhanced price history processing for the interactive chart
+    const processEnhancedPriceHistory = (csvData) => {
       if (!csvData || !Array.isArray(csvData) || csvData.length === 0) {
+        console.log('No CSV data for enhanced price history');
         return [];
       }
       
       try {
-        // Keepa timestamps are in minutes since 2011-01-01
         const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
-        
-        // Process only the first few data points to avoid overwhelming the response
         const historyPoints = [];
-        const maxPoints = 5;
         
-        for (let i = 0; i < Math.min(csvData.length, maxPoints); i++) {
+        // Process CSV data in pairs (timestamp, values array)
+        for (let i = 0; i < csvData.length; i += 2) {
           const timestampMinutes = csvData[i];
+          const values = csvData[i + 1];
           
           // Skip invalid timestamps
-          if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
+          if (typeof timestampMinutes !== 'number' || timestampMinutes < 0 || !Array.isArray(values)) {
             continue;
           }
           
@@ -450,19 +447,26 @@ serve(async (req) => {
             continue;
           }
           
-          historyPoints.push({
+          // Extract values based on Keepa indices
+          const historyPoint = {
             timestamp: timestamp.toISOString(),
-            buyBoxPrice: null,
-            amazonPrice: null,
-            newPrice: null,
-            salesRank: null,
-            offerCount: null,
-          });
+            amazonPrice: values[0] && values[0] !== -1 ? values[0] / 100 : null,
+            fbaPrice: values[1] && values[1] !== -1 ? values[1] / 100 : null,
+            fbmPrice: values[3] && values[3] !== -1 ? values[3] / 100 : null,
+            buyBoxPrice: values[4] && values[4] !== -1 ? values[4] / 100 : null,
+            salesRank: values[5] && values[5] !== -1 ? values[5] : null,
+            offerCount: values[20] && values[20] !== -1 ? values[20] : null,
+            rating: values[42] && values[42] !== -1 ? values[42] / 10 : null,
+            reviewCount: values[44] && values[44] !== -1 ? values[44] : null,
+          };
+          
+          historyPoints.push(historyPoint);
         }
         
+        console.log('Enhanced price history processed:', historyPoints.length, 'points');
         return historyPoints;
       } catch (error) {
-        console.error('Error processing price history:', error);
+        console.error('Error processing enhanced price history:', error);
         return [];
       }
     };
@@ -497,7 +501,11 @@ serve(async (req) => {
         reviewRating: reviewRating,
         reviewCount: reviewCount,
         
-        priceHistory: processPriceHistory(product.csv),
+        // Enhanced price history for the interactive chart
+        priceHistory: processEnhancedPriceHistory(product.csv),
+        
+        // Raw CSV data for the interactive chart component
+        csv: product.csv,
         
         tokensUsed: data.tokensUsed || 0,
         tokensLeft: data.tokensLeft || 0,

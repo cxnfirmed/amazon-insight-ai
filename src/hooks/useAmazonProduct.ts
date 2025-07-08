@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -41,6 +40,7 @@ export interface AmazonProduct {
     originalUpc: string;
     convertedAsin: string;
   };
+  csv?: any[];
 }
 
 export const useAmazonProduct = () => {
@@ -178,7 +178,8 @@ export const useAmazonProduct = () => {
       console.log('Keepa API successful, processing data...', {
         title: keepaData.title,
         asin: keepaData.asin,
-        upcConversion: keepaData.upcConversion
+        hasCsvData: !!keepaData.csv,
+        csvLength: keepaData.csv?.length
       });
 
       const productData: AmazonProduct = {
@@ -215,6 +216,9 @@ export const useAmazonProduct = () => {
         
         // UPC conversion info
         upc_conversion: keepaData.upcConversion || null,
+        
+        // CSV data for interactive chart
+        csv: keepaData.csv || [],
         
         // Metadata
         last_updated: keepaData.lastUpdate,
