@@ -188,7 +188,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                     <Truck className="w-3 h-3" />
                     {product.offer_count || 0} Offers
                   </Badge>
-                  {product.manufacturer && <Badge variant="outline">{product.manufacturer}</Badge>}
+                  {product.brand && <Badge variant="outline">Brand: {product.brand}</Badge>}
                   {product.category && <Badge variant="outline">{product.category}</Badge>}
                 </div>
                 

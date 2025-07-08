@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -51,7 +50,7 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                     <Package className="w-3 h-3" />
                     {product.offer_count || 0} Offers
                   </Badge>
-                  {product.manufacturer && <Badge variant="outline">{product.manufacturer}</Badge>}
+                  {product.brand && <Badge variant="outline">Brand: {product.brand}</Badge>}
                 </div>
                 
                 <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">

@@ -449,6 +449,7 @@ serve(async (req) => {
         asin: product.asin,
         title: product.title || 'Product title not available',
         manufacturer: product.manufacturer || null,
+        brand: product.brand || null,
         category: product.categoryTree?.[0]?.name || 'Unknown Category',
         imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
         

@@ -6,6 +6,7 @@ export interface AmazonProduct {
   asin: string;
   title: string;
   manufacturer: string | null;
+  brand: string | null;
   category: string;
   image_url: string | null;
   buy_box_price: number | null;
@@ -181,6 +182,7 @@ export const useAmazonProduct = () => {
         asin: keepaData.asin,
         title: keepaData.title || 'Product title not available',
         manufacturer: keepaData.manufacturer,
+        brand: keepaData.brand,
         category: keepaData.category || 'Unknown',
         image_url: keepaData.imageUrl,
         
