@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -183,7 +184,7 @@ serve(async (req) => {
     
     console.log('Final sales rank decision:', salesRank);
 
-    // FIXED FBA PRICE CALCULATION - Using proper offer structure
+    // FIXED FBA PRICE CALCULATION - Using the specified logic
     console.log('=== FIXED FBA PRICE CALCULATION ===');
     let lowestFBAPrice = null;
     
@@ -193,7 +194,7 @@ serve(async (req) => {
       
       const validFBAPrices = [];
       
-      // Iterate through live offer IDs
+      // Loop through product.liveOffersOrder
       for (let i = 0; i < product.liveOffersOrder.length; i++) {
         const offerId = product.liveOffersOrder[i];
         const offer = product.offers[offerId];
@@ -203,44 +204,47 @@ serve(async (req) => {
           continue;
         }
         
-        console.log(`=== OFFER ${i} (ID: ${offerId}) DETAILED ANALYSIS ===`);
-        console.log('Full offer object keys:', Object.keys(offer));
-        console.log('isFBA:', offer.isFBA, 'type:', typeof offer.isFBA);
-        console.log('offerCSV length:', offer.offerCSV ? offer.offerCSV.length : 'No offerCSV');
-        console.log('offerCSV last 5 values:', offer.offerCSV ? offer.offerCSV.slice(-5) : 'No offerCSV');
+        console.log(`=== OFFER ${i} (ID: ${offerId}) ANALYSIS ===`);
+        console.log('offer.isFBA:', offer.isFBA);
+        console.log('offer.offerCSV exists:', !!offer.offerCSV);
+        console.log('offer.offerCSV length:', offer.offerCSV?.length);
         
-        // Check if this is an FBA offer
-        const isFBAOffer = offer.isFBA === true;
-        
-        // Check if offerCSV exists and has data
-        const hasOfferCSV = offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3;
-        
-        console.log(`Offer ${i} validation: isFBA=${isFBAOffer}, hasOfferCSV=${hasOfferCSV}`);
-        
-        if (isFBAOffer && hasOfferCSV) {
-          // Get the 3rd-to-last value as the latest price
-          const priceIndex = offer.offerCSV.length - 3;
-          const rawPrice = offer.offerCSV[priceIndex];
+        // Filter offers where offer.isFBA === true
+        if (offer.isFBA === true) {
+          console.log(`✅ Offer ${i} is FBA`);
           
-          console.log(`Offer ${i} raw price from offerCSV[${priceIndex}]:`, rawPrice);
-          
-          if (rawPrice && rawPrice > 0) {
-            const priceInDollars = rawPrice / 100;
-            validFBAPrices.push(priceInDollars);
-            console.log(`✅ Found valid FBA offer ${i}: $${priceInDollars}`);
+          // Filter offers where offer.offerCSV?.length >= 3
+          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
+            console.log(`✅ Offer ${i} has sufficient offerCSV data (${offer.offerCSV.length} items)`);
+            
+            // Get the 3rd-to-last value: offer.offerCSV[offerCSV.length - 3]
+            const priceIndex = offer.offerCSV.length - 3;
+            const rawPrice = offer.offerCSV[priceIndex];
+            
+            console.log(`Offer ${i} raw price from offerCSV[${priceIndex}]:`, rawPrice);
+            
+            // Filter where price is a number between 1 and 1,000,000
+            if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
+              validFBAPrices.push(rawPrice);
+              console.log(`✅ Offer ${i} has valid price: ${rawPrice} (will be ${rawPrice / 100} USD)`);
+            } else {
+              console.log(`❌ Offer ${i} price ${rawPrice} is not a valid number between 1 and 1,000,000`);
+            }
           } else {
-            console.log(`❌ Offer ${i} has invalid price: ${rawPrice}`);
+            console.log(`❌ Offer ${i} offerCSV length insufficient:`, offer.offerCSV?.length);
           }
         } else {
-          console.log(`❌ Offer ${i} failed validation: FBA=${isFBAOffer}, CSV=${hasOfferCSV}`);
+          console.log(`❌ Offer ${i} is not FBA (isFBA: ${offer.isFBA})`);
         }
         console.log('=== END OFFER ANALYSIS ===');
       }
       
       if (validFBAPrices.length > 0) {
-        lowestFBAPrice = Math.min(...validFBAPrices);
-        console.log('✅ Calculated lowest FBA price from offers:', lowestFBAPrice);
-        console.log('All valid FBA prices found:', validFBAPrices);
+        // Use Math.min(...validFBAPrices) / 100 for the final result
+        const lowestRawPrice = Math.min(...validFBAPrices);
+        lowestFBAPrice = lowestRawPrice / 100;
+        console.log('✅ Calculated lowest FBA price:', lowestFBAPrice);
+        console.log('All valid FBA prices found:', validFBAPrices.map(p => p / 100));
       } else {
         console.log('❌ No valid FBA offers found after processing all offers');
         lowestFBAPrice = null;
