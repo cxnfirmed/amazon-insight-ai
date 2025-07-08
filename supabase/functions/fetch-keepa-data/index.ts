@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -586,7 +585,8 @@ serve(async (req) => {
     if (isUpc) {
       console.log(`Converting UPC to ASIN using Keepa productFinder: ${asin}`);
       
-      const productFinderUrl = `https://api.keepa.com/product-finder?key=${keepaApiKey}&domain=${domain}&code=${asin}`;
+      // Use the correct Keepa productFinder API format
+      const productFinderUrl = `https://api.keepa.com/productfinder?key=${keepaApiKey}&domain=${domain}&codes=${asin}`;
       
       try {
         const finderResponse = await fetch(productFinderUrl);
@@ -597,7 +597,6 @@ serve(async (req) => {
           const errorText = await finderResponse.text();
           console.log('Keepa productFinder error response:', errorText);
           
-          // Instead of throwing immediately, return a more helpful error
           if (finderResponse.status === 404) {
             throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
           } else if (finderResponse.status === 429) {
@@ -631,7 +630,7 @@ serve(async (req) => {
         
       } catch (error) {
         console.error('UPC conversion failed:', error);
-        throw error; // Re-throw the detailed error
+        throw error;
       }
     }
 
