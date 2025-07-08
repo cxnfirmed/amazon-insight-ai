@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -90,15 +91,16 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
 
   const getAmazonPrice = () => {
     console.log('AMZ Debug: Checking for Amazon price in product data');
+    console.log('AMZ Debug: Amazon price value:', product.amazon_price);
     
-    // Use the amazonPrice from the API response
-    if (product.amazon_price !== null && product.amazon_price !== undefined) {
+    // Check if Amazon price exists and is a valid number
+    if (product.amazon_price !== null && product.amazon_price !== undefined && typeof product.amazon_price === 'number') {
       console.log('AMZ Debug: Found Amazon price from API:', product.amazon_price);
       return `$${product.amazon_price.toFixed(2)}`;
     }
     
-    console.log('AMZ Debug: No Amazon price found, returning None');
-    return 'None';
+    console.log('AMZ Debug: No Amazon price found - Amazon is not selling this product');
+    return 'Not Sold by Amazon';
   };
 
   if (product.data_source === 'Error') {
@@ -334,7 +336,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-600 dark:text-slate-400">AMZ:</span>
+                  <span className="text-slate-600 dark:text-slate-400">Amazon Direct:</span>
                   <span className="font-semibold text-orange-600">
                     {getAmazonPrice()}
                   </span>
@@ -374,7 +376,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
             <CardContent>
               <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded">
                 <p className="text-sm text-blue-800 dark:text-blue-200">
-                  <strong>Note:</strong> This shows the raw Keepa API response. All displayed data comes exclusively from Keepa.
+                  <strong>Note:</strong> This shows the raw Keepa API response. Amazon price is only shown when Amazon (seller ID: ATVPDKIKX0DER) is actually selling the product.
                 </p>
               </div>
               <pre className="text-xs overflow-auto max-h-96 bg-white dark:bg-black p-4 rounded">

@@ -244,6 +244,42 @@ serve(async (req) => {
     
     console.log('Final stock status:', inStock);
     
+    // AMAZON PRICE DETECTION - Fix the logic to properly identify Amazon as seller
+    console.log('=== AMAZON PRICE DETECTION DEBUG ===');
+    console.log('Buy box seller ID:', product.buyBoxSellerId);
+    console.log('Buy box is Amazon:', product.buyBoxIsAmazon);
+    console.log('Live offers order:', product.liveOffersOrder?.slice(0, 3)); // Show first 3 offers
+    
+    let amazonPrice = null;
+    
+    // Method 1: Check if Amazon is the buy box winner
+    if (product.buyBoxSellerId === 'ATVPDKIKX0DER' || product.buyBoxIsAmazon === true) {
+      amazonPrice = currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null;
+      console.log('Amazon is buy box winner, price:', amazonPrice);
+    }
+    
+    // Method 2: Check live offers for Amazon seller ID
+    if (!amazonPrice && product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
+      for (const offer of product.liveOffersOrder) {
+        if (offer && offer.sellerId === 'ATVPDKIKX0DER') {
+          amazonPrice = offer.price ? offer.price / 100 : null;
+          console.log('Found Amazon offer in live offers, price:', amazonPrice);
+          break;
+        }
+      }
+    }
+    
+    // Method 3: Check if Amazon price is available in stats (this would be Amazon direct, not FBA)
+    // Only use this if we haven't found Amazon in buy box or live offers
+    if (!amazonPrice) {
+      // Check if there's a specific Amazon price field that's different from FBA prices
+      // This is tricky without clear documentation, so we'll be conservative
+      console.log('No Amazon seller found in buy box or live offers');
+    }
+    
+    console.log('Final Amazon price decision:', amazonPrice);
+    console.log('=== END AMAZON PRICE DETECTION DEBUG ===');
+    
     // Log the final extracted data for debugging
     console.log('Extracted data summary:', {
       salesRank,
@@ -251,6 +287,7 @@ serve(async (req) => {
       inStock,
       buyBoxPrice: currentStats[18],
       lowestFBAPrice: currentStats[0],
+      amazonPrice,
       liveOffersCount: product.liveOffersOrder?.length || 0
     });
     
@@ -312,7 +349,7 @@ serve(async (req) => {
         buyBoxPrice: currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null,
         lowestFBAPrice: currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null,
         lowestFBMPrice: currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null,
-        amazonPrice: currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null,
+        amazonPrice: amazonPrice,
         
         fees: {
           pickAndPackFee: product.fbaFees?.pickAndPackFee ? product.fbaFees.pickAndPackFee / 100 : null,
