@@ -64,7 +64,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   product, 
   title = "Keepa Price & Sales History" 
 }) => {
-  const [timeRange, setTimeRange] = useState('3m');
+  const [timeRange, setTimeRange] = useState('all');
   const [chartMode, setChartMode] = useState<'price' | 'sales' | 'reviews'>('price');
   const [lineVisibility, setLineVisibility] = useState<LineVisibility>({
     amazonPrice: true,
@@ -95,50 +95,26 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     
     console.log('Processing CSV data, length:', csvData.length);
     console.log('First few CSV items:', csvData.slice(0, 5));
-    console.log('CSV data structure - first item:', csvData[0]);
     
     const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
     const dataPoints: ChartDataPoint[] = [];
     
-    // Updated parsing logic to handle the actual CSV structure
-    // Each CSV entry appears to be a complete data point, not alternating pairs
+    // Process each CSV entry
     csvData.forEach((entry, index) => {
       console.log(`Processing entry ${index}:`, entry);
       
-      // Handle different possible structures
-      let timestampMinutes, values;
-      
-      if (Array.isArray(entry)) {
-        // If entry is an array, first element should be timestamp
-        if (entry.length >= 2) {
-          timestampMinutes = entry[0];
-          values = entry.slice(1); // Rest of the array contains values
-        } else {
-          console.log('Invalid entry structure - array too short:', entry);
-          return;
-        }
-      } else if (typeof entry === 'object' && entry !== null) {
-        // If entry is an object, look for timestamp and values properties
-        timestampMinutes = entry.timestamp || entry[0];
-        values = entry.values || entry.slice?.(1) || [];
-      } else {
-        console.log('Invalid entry structure - not array or object:', entry);
+      // Handle the nested array structure from Keepa CSV
+      if (!Array.isArray(entry) || entry.length < 2) {
+        console.log('Invalid entry structure - not array or too short:', entry);
         return;
       }
+      
+      const timestampMinutes = entry[0];
+      const values = entry.slice(1); // All values after timestamp
       
       if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
         console.log('Invalid timestamp at index', index, ':', timestampMinutes);
         return;
-      }
-      
-      if (!Array.isArray(values) && typeof values !== 'object') {
-        console.log('Invalid values at index', index, ':', values);
-        return;
-      }
-      
-      // Convert to array if it's an object
-      if (typeof values === 'object' && !Array.isArray(values)) {
-        values = Object.values(values);
       }
       
       const timestampMs = keepaEpoch + (timestampMinutes * 60 * 1000);
@@ -149,13 +125,15 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         return;
       }
       
-      console.log(`Entry ${index} - timestamp: ${timestampMinutes}, values:`, values);
+      console.log(`Entry ${index} - timestamp: ${timestampMinutes}, date: ${date.toISOString()}, values:`, values);
       
-      // Extract values from the array based on Keepa indices
-      // Handle both array and object structures
+      // Extract values from the array - handling null/-1 as undefined
       const getValue = (index: number) => {
         const val = values[index];
-        return val !== null && val !== undefined && val !== -1 ? val : undefined;
+        if (val === null || val === undefined || val === -1) {
+          return undefined;
+        }
+        return val;
       };
       
       const dataPoint: ChartDataPoint = {
@@ -184,15 +162,34 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
 
   // Filter data based on time range
   const filteredData = useMemo(() => {
-    if (!chartData.length) return [];
+    if (!chartData.length) {
+      console.log('No chart data to filter');
+      return [];
+    }
     
-    if (timeRange === 'all') return chartData;
+    if (timeRange === 'all') {
+      console.log('Using all time range, returning all data:', chartData.length);
+      return chartData;
+    }
     
     const range = TIME_RANGES.find(r => r.value === timeRange);
-    if (!range || !range.days) return chartData;
+    if (!range || !range.days) {
+      console.log('Invalid time range, returning all data:', timeRange);
+      return chartData;
+    }
     
     const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
-    return chartData.filter(point => point.timestampMs >= cutoffTime);
+    const filtered = chartData.filter(point => point.timestampMs >= cutoffTime);
+    
+    console.log(`Time range filter '${timeRange}' (${range.days} days):`, {
+      originalCount: chartData.length,
+      filteredCount: filtered.length,
+      cutoffTime: new Date(cutoffTime).toISOString(),
+      oldestDataPoint: chartData[0]?.timestamp,
+      newestDataPoint: chartData[chartData.length - 1]?.timestamp
+    });
+    
+    return filtered;
   }, [chartData, timeRange]);
 
   const toggleLineVisibility = (line: keyof LineVisibility) => {
@@ -235,13 +232,24 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
           <div className="flex items-center justify-center h-64">
             <div className="text-center">
               <p className="text-slate-600 dark:text-slate-400 mb-2">
-                No historical price data available from Keepa API
+                No historical price data available for the selected time range
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 CSV data length: {product.csv?.length || 0} | 
                 Debug CSV: {product.debug_data?.data?.csv?.length || 0} |
-                Processed points: {chartData.length}
+                Processed points: {chartData.length} |
+                Time range: {timeRange}
               </p>
+              {chartData.length > 0 && (
+                <Button
+                  onClick={() => setTimeRange('all')}
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                >
+                  Show All Time Data
+                </Button>
+              )}
             </div>
           </div>
         </CardContent>
