@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -184,49 +183,89 @@ serve(async (req) => {
     
     console.log('Final sales rank decision:', salesRank);
 
-    // IMPROVED FBA PRICE CALCULATION - Get lowest priced live FBA offer
-    console.log('=== FBA PRICE CALCULATION ===');
+    // ENHANCED FBA PRICE CALCULATION - Get lowest priced live FBA offer
+    console.log('=== ENHANCED FBA PRICE CALCULATION ===');
     let lowestFBAPrice = null;
     
     // First check live offers for current FBA prices
     if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
       console.log('Found liveOffersOrder array with', product.liveOffersOrder.length, 'live offers');
+      console.log('First few live offers for detailed inspection:');
       
       const validFBAPrices = [];
       
-      for (let i = 0; i < product.liveOffersOrder.length; i++) {
+      for (let i = 0; i < Math.min(product.liveOffersOrder.length, 5); i++) {
         const liveOffer = product.liveOffersOrder[i];
-        console.log(`Checking live offer ${i}:`, {
-          isFBA: liveOffer.isFBA,
-          condition: liveOffer.condition,
-          price: liveOffer.price,
-          isShippable: liveOffer.isShippable,
-          sellerId: liveOffer.sellerId
-        });
+        console.log(`=== LIVE OFFER ${i} DETAILED ANALYSIS ===`);
+        console.log('Full offer object:', JSON.stringify(liveOffer, null, 2));
+        console.log('isFBA:', liveOffer.isFBA, 'type:', typeof liveOffer.isFBA);
+        console.log('condition:', liveOffer.condition, 'type:', typeof liveOffer.condition);
+        console.log('price:', liveOffer.price, 'type:', typeof liveOffer.price);
+        console.log('isShippable:', liveOffer.isShippable, 'type:', typeof liveOffer.isShippable);
+        console.log('sellerId:', liveOffer.sellerId);
+        console.log('=== END OFFER ANALYSIS ===');
         
-        // Check if this is a live FBA offer with new condition
-        // Relaxed validation - only check core FBA criteria
-        if (liveOffer.isFBA === true && 
-            liveOffer.condition === 1 && 
-            liveOffer.price && 
-            liveOffer.price > 0) {
+        // Enhanced FBA detection with multiple checks
+        const isFBAOffer = liveOffer.isFBA === true || liveOffer.isFBA === 1;
+        const isNewCondition = liveOffer.condition === 1 || liveOffer.condition === '1';
+        const hasValidPrice = liveOffer.price && liveOffer.price > 0;
+        
+        console.log(`Offer ${i} validation: isFBA=${isFBAOffer}, isNew=${isNewCondition}, hasPrice=${hasValidPrice}`);
+        
+        if (isFBAOffer && isNewCondition && hasValidPrice) {
           const priceInDollars = liveOffer.price / 100;
           validFBAPrices.push(priceInDollars);
-          console.log(`Found valid live FBA offer ${i}: $${priceInDollars}`);
+          console.log(`✅ Found valid live FBA offer ${i}: $${priceInDollars}`);
+        } else {
+          console.log(`❌ Offer ${i} failed validation: FBA=${isFBAOffer}, New=${isNewCondition}, Price=${hasValidPrice}`);
         }
       }
       
       if (validFBAPrices.length > 0) {
         lowestFBAPrice = Math.min(...validFBAPrices);
-        console.log('Calculated lowest FBA price from live offers:', lowestFBAPrice);
+        console.log('✅ Calculated lowest FBA price from live offers:', lowestFBAPrice);
         console.log('All valid FBA prices found:', validFBAPrices);
       } else {
-        console.log('No valid live FBA offers found');
+        console.log('❌ No valid live FBA offers found after enhanced validation');
+        
+        // Fallback: Check if there are any FBA offers at all (even with different conditions)
+        const anyFBAOffers = product.liveOffersOrder.filter(offer => 
+          offer.isFBA === true || offer.isFBA === 1
+        );
+        console.log('Total FBA offers (any condition):', anyFBAOffers.length);
+        
+        if (anyFBAOffers.length > 0) {
+          console.log('FBA offers found but not meeting our criteria:');
+          anyFBAOffers.forEach((offer, idx) => {
+            console.log(`FBA Offer ${idx}:`, {
+              condition: offer.condition,
+              price: offer.price ? offer.price / 100 : null,
+              isFBA: offer.isFBA
+            });
+          });
+        }
+      }
+    } else {
+      console.log('❌ No liveOffersOrder array found');
+    }
+    
+    // Secondary check: Look at stats for FBA pricing data
+    if (!lowestFBAPrice) {
+      console.log('=== CHECKING STATS FOR FBA PRICE ===');
+      
+      // Check various stats indices that might contain FBA pricing
+      const statsPotentialFBAIndices = [1, 2, 16, 17, 18, 19];
+      
+      for (const index of statsPotentialFBAIndices) {
+        if (currentStats[index] !== undefined && currentStats[index] !== null && currentStats[index] !== -1) {
+          const potentialPrice = currentStats[index] / 100;
+          console.log(`Stats[${index}] contains: $${potentialPrice}`);
+        }
       }
     }
     
     console.log('Final FBA price decision:', lowestFBAPrice);
-    console.log('=== END FBA PRICE CALCULATION ===');
+    console.log('=== END ENHANCED FBA PRICE CALCULATION ===');
     
     // IMPROVED OFFER COUNT EXTRACTION
     let offerCount = 0;
