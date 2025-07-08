@@ -183,96 +183,108 @@ serve(async (req) => {
     
     console.log('Final sales rank decision:', salesRank);
 
-    // ENHANCED FBA PRICE CALCULATION - Enhanced with stock checking
-    console.log('=== ENHANCED FBA PRICE CALCULATION ===');
+    // UPDATED FBA PRICE CALCULATION - Using stats.current[10] (NEW_FBA) as primary source
+    console.log('=== UPDATED FBA PRICE CALCULATION ===');
     let lowestFBAPrice = null;
     
-    if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.offers) {
-      console.log('Found liveOffersOrder array with', product.liveOffersOrder.length, 'offer IDs');
-      console.log('Found offers object with', Object.keys(product.offers).length, 'offers');
+    // Method 1: Check stats.current[10] (NEW_FBA) first
+    const newFBAPrice = currentStats[10];
+    console.log('NEW_FBA price from stats.current[10]:', newFBAPrice);
+    
+    if (newFBAPrice !== undefined && newFBAPrice !== null && newFBAPrice !== -1) {
+      lowestFBAPrice = newFBAPrice / 100;
+      console.log('✅ Using NEW_FBA price from stats.current[10]:', lowestFBAPrice);
+    } else {
+      console.log('NEW_FBA price not available, falling back to live offers scan...');
       
-      const validFBAPrices = [];
-      
-      // Loop through product.liveOffersOrder
-      for (let i = 0; i < product.liveOffersOrder.length; i++) {
-        const offerId = product.liveOffersOrder[i];
-        const offer = product.offers[offerId];
+      // Method 2: Fallback to scanning live offers (existing logic)
+      if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.offers) {
+        console.log('Found liveOffersOrder array with', product.liveOffersOrder.length, 'offer IDs');
+        console.log('Found offers object with', Object.keys(product.offers).length, 'offers');
         
-        if (!offer) {
-          console.log(`Offer ${offerId} not found in offers object`);
-          continue;
-        }
+        const validFBAPrices = [];
         
-        console.log(`=== OFFER ${i} (ID: ${offerId}) ANALYSIS ===`);
-        console.log('offer.isFBA:', offer.isFBA);
-        console.log('offer.offerCSV exists:', !!offer.offerCSV);
-        console.log('offer.offerCSV length:', offer.offerCSV?.length);
-        console.log('offer.stockQty:', offer.stockQty);
-        console.log('offer.availableQty:', offer.availableQty);
-        
-        // Filter offers where offer.isFBA === true OR offer.isFBA === 1
-        const isFBAOffer = offer.isFBA === true || offer.isFBA === 1;
-        
-        if (isFBAOffer) {
-          console.log(`✅ Offer ${i} is FBA`);
+        // Loop through product.liveOffersOrder
+        for (let i = 0; i < product.liveOffersOrder.length; i++) {
+          const offerId = product.liveOffersOrder[i];
+          const offer = product.offers[offerId];
           
-          // Check stock availability - consider offer valid if:
-          // 1. No stock info available (assume available)
-          // 2. stockQty > 0
-          // 3. availableQty > 0
-          const hasStock = !offer.stockQty || offer.stockQty > 0 || 
-                          !offer.availableQty || offer.availableQty > 0;
+          if (!offer) {
+            console.log(`Offer ${offerId} not found in offers object`);
+            continue;
+          }
           
-          if (hasStock) {
-            console.log(`✅ Offer ${i} has stock (stockQty: ${offer.stockQty}, availableQty: ${offer.availableQty})`);
+          console.log(`=== OFFER ${i} (ID: ${offerId}) ANALYSIS ===`);
+          console.log('offer.isFBA:', offer.isFBA);
+          console.log('offer.offerCSV exists:', !!offer.offerCSV);
+          console.log('offer.offerCSV length:', offer.offerCSV?.length);
+          console.log('offer.stockQty:', offer.stockQty);
+          console.log('offer.availableQty:', offer.availableQty);
+          
+          // Filter offers where offer.isFBA === true OR offer.isFBA === 1
+          const isFBAOffer = offer.isFBA === true || offer.isFBA === 1;
+          
+          if (isFBAOffer) {
+            console.log(`✅ Offer ${i} is FBA`);
             
-            // Filter offers where offer.offerCSV?.length >= 3
-            if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
-              console.log(`✅ Offer ${i} has sufficient offerCSV data (${offer.offerCSV.length} items)`);
+            // Check stock availability - consider offer valid if:
+            // 1. No stock info available (assume available)
+            // 2. stockQty > 0
+            // 3. availableQty > 0
+            const hasStock = !offer.stockQty || offer.stockQty > 0 || 
+                            !offer.availableQty || offer.availableQty > 0;
+            
+            if (hasStock) {
+              console.log(`✅ Offer ${i} has stock (stockQty: ${offer.stockQty}, availableQty: ${offer.availableQty})`);
               
-              // Get the 3rd-to-last value: offer.offerCSV[offerCSV.length - 3]
-              const priceIndex = offer.offerCSV.length - 3;
-              const rawPrice = offer.offerCSV[priceIndex];
-              
-              console.log(`Offer ${i} raw price from offerCSV[${priceIndex}]:`, rawPrice);
-              
-              // Filter where price is a number between 1 and 1,000,000
-              if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
-                validFBAPrices.push(rawPrice);
-                console.log(`✅ Offer ${i} has valid price: ${rawPrice} (will be ${rawPrice / 100} USD)`);
+              // Filter offers where offer.offerCSV?.length >= 3
+              if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
+                console.log(`✅ Offer ${i} has sufficient offerCSV data (${offer.offerCSV.length} items)`);
+                
+                // Get the 3rd-to-last value: offer.offerCSV[offerCSV.length - 3]
+                const priceIndex = offer.offerCSV.length - 3;
+                const rawPrice = offer.offerCSV[priceIndex];
+                
+                console.log(`Offer ${i} raw price from offerCSV[${priceIndex}]:`, rawPrice);
+                
+                // Filter where price is a number between 1 and 1,000,000
+                if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
+                  validFBAPrices.push(rawPrice);
+                  console.log(`✅ Offer ${i} has valid price: ${rawPrice} (will be ${rawPrice / 100} USD)`);
+                } else {
+                  console.log(`❌ Offer ${i} price ${rawPrice} is not a valid number between 1 and 1,000,000`);
+                }
               } else {
-                console.log(`❌ Offer ${i} price ${rawPrice} is not a valid number between 1 and 1,000,000`);
+                console.log(`❌ Offer ${i} offerCSV length insufficient:`, offer.offerCSV?.length);
               }
             } else {
-              console.log(`❌ Offer ${i} offerCSV length insufficient:`, offer.offerCSV?.length);
+              console.log(`❌ Offer ${i} has no stock (stockQty: ${offer.stockQty}, availableQty: ${offer.availableQty})`);
             }
           } else {
-            console.log(`❌ Offer ${i} has no stock (stockQty: ${offer.stockQty}, availableQty: ${offer.availableQty})`);
+            console.log(`❌ Offer ${i} is not FBA (isFBA: ${offer.isFBA})`);
           }
-        } else {
-          console.log(`❌ Offer ${i} is not FBA (isFBA: ${offer.isFBA})`);
+          console.log('=== END OFFER ANALYSIS ===');
         }
-        console.log('=== END OFFER ANALYSIS ===');
-      }
-      
-      if (validFBAPrices.length > 0) {
-        // Use Math.min(...validFBAPrices) / 100 for the final result
-        const lowestRawPrice = Math.min(...validFBAPrices);
-        lowestFBAPrice = lowestRawPrice / 100;
-        console.log('✅ Calculated lowest FBA price:', lowestFBAPrice);
-        console.log('All valid FBA prices found:', validFBAPrices.map(p => p / 100));
+        
+        if (validFBAPrices.length > 0) {
+          // Use Math.min(...validFBAPrices) / 100 for the final result
+          const lowestRawPrice = Math.min(...validFBAPrices);
+          lowestFBAPrice = lowestRawPrice / 100;
+          console.log('✅ Calculated lowest FBA price from live offers:', lowestFBAPrice);
+          console.log('All valid FBA prices found:', validFBAPrices.map(p => p / 100));
+        } else {
+          console.log('❌ No valid FBA offers found after processing all offers');
+          lowestFBAPrice = null;
+        }
       } else {
-        console.log('❌ No valid FBA offers found after processing all offers');
-        lowestFBAPrice = null;
+        console.log('❌ Missing required data structures for FBA price calculation');
+        console.log('Has liveOffersOrder:', !!product.liveOffersOrder);
+        console.log('Has offers object:', !!product.offers);
       }
-    } else {
-      console.log('❌ Missing required data structures for FBA price calculation');
-      console.log('Has liveOffersOrder:', !!product.liveOffersOrder);
-      console.log('Has offers object:', !!product.offers);
     }
     
     console.log('Final FBA price decision:', lowestFBAPrice);
-    console.log('=== END ENHANCED FBA PRICE CALCULATION ===');
+    console.log('=== END UPDATED FBA PRICE CALCULATION ===');
     
     // IMPROVED OFFER COUNT EXTRACTION
     let offerCount = 0;
