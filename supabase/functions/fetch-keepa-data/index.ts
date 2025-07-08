@@ -39,13 +39,14 @@ serve(async (req) => {
     }
 
     console.log(`Processing request for: ${asin}, isUpc: ${isUpc}`);
+    console.log(`Using API key: ${keepaApiKey.substring(0, 10)}...`);
 
     // If it's a UPC search, use product endpoint with code parameter
     if (isUpc) {
       console.log(`UPC search detected: ${asin}`);
       
       // Use the product endpoint with code parameter for UPC lookup
-      const upcUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${asin}&history=0&stats=1`;
+      const upcUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${asin}&history=1&stats=1&offers=20`;
       
       console.log('Calling Keepa API for UPC with URL:', upcUrl);
       
@@ -77,6 +78,10 @@ serve(async (req) => {
       if (upcData.products.length === 1) {
         const product = upcData.products[0];
         
+        // Extract current prices from the stats object
+        const currentStats = product.stats?.current || {};
+        console.log('Product current stats:', currentStats);
+        
         return new Response(JSON.stringify({
           success: true,
           data: {
@@ -86,22 +91,22 @@ serve(async (req) => {
             category: product.categoryTree?.[product.categoryTree.length - 1]?.name || 'Unknown',
             imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
             
-            buyBoxPrice: product.stats?.current?.[18]?.[1] ? product.stats.current[18][1] / 100 : null,
-            lowestFBAPrice: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null,
-            lowestFBMPrice: product.stats?.current?.[7]?.[1] ? product.stats.current[7][1] / 100 : null,
-            amazonPrice: product.stats?.current?.[1]?.[1] ? product.stats.current[1][1] / 100 : null,
+            buyBoxPrice: currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null,
+            lowestFBAPrice: currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null,
+            lowestFBMPrice: currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null,
+            amazonPrice: currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null,
             
             fees: {
               pickAndPackFee: product.fbaFees?.pickAndPackFee ? product.fbaFees.pickAndPackFee / 100 : null,
-              referralFee: product.referralFeePercent ? (product.stats?.current?.[18]?.[1] || 0) * (product.referralFeePercent / 10000) : null,
+              referralFee: product.referralFeePercent ? (currentStats[18] || 0) * (product.referralFeePercent / 10000) : null,
               storageFee: product.fbaFees?.storageFee ? product.fbaFees.storageFee / 100 : null,
               variableClosingFee: product.variableClosingFee ? product.variableClosingFee / 100 : null,
             },
             
-            offerCount: product.stats?.current?.[2]?.[1] || 0,
+            offerCount: currentStats[2] || 0,
             estimatedMonthlySales: product.monthlySold || null,
-            inStock: product.stats?.current?.[12]?.[1] === 1,
-            salesRank: product.salesRanks?.[0]?.[1] || null,
+            inStock: currentStats[12] === 1,
+            salesRank: product.salesRanks?.[0]?.current || null,
             
             priceHistory: [],
             
@@ -124,9 +129,9 @@ serve(async (req) => {
         asin: product.asin,
         title: product.title || 'Unknown Product',
         monthlySales: product.monthlySold || 0,
-        salesRank: product.salesRanks?.[0]?.[1] || null,
+        salesRank: product.salesRanks?.[0]?.current || null,
         imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
-        price: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null
+        price: product.stats?.current?.[0] !== undefined && product.stats.current[0] !== -1 ? product.stats.current[0] / 100 : null
       }));
       
       return new Response(JSON.stringify({
@@ -140,9 +145,11 @@ serve(async (req) => {
       });
     }
     
-    // Regular ASIN search
+    // Regular ASIN search with enhanced parameters
     console.log(`Regular ASIN search: ${asin}`);
-    const productUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${asin}&stats=1&history=1`;
+    const productUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${asin}&stats=1&history=1&offers=20`;
+    
+    console.log('Calling Keepa API with URL:', productUrl);
     
     const response = await fetch(productUrl);
     
@@ -153,6 +160,7 @@ serve(async (req) => {
     
     const responseText = await response.text();
     console.log('Product API raw response length:', responseText.length);
+    console.log('Product API response preview:', responseText.substring(0, 500));
     
     let data;
     try {
@@ -163,11 +171,41 @@ serve(async (req) => {
       throw new Error(`Invalid JSON response from Keepa product API: ${jsonError.message}`);
     }
     
+    console.log('Parsed API response structure:', {
+      hasProducts: !!data.products,
+      productsLength: data.products?.length,
+      tokensUsed: data.tokensUsed,
+      tokensLeft: data.tokensLeft
+    });
+    
     if (!data.products || data.products.length === 0) {
       throw new Error(`ASIN ${asin} not found in Keepa database`);
     }
 
     const product = data.products[0];
+    console.log('Raw product data keys:', Object.keys(product));
+    console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
+    
+    // Extract current prices from the stats object - fix the access pattern
+    const currentStats = product.stats?.current || {};
+    console.log('Current stats raw:', currentStats);
+    
+    // Keepa stores current prices as direct values, not nested arrays
+    const buyBoxPrice = currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null;
+    const lowestFBAPrice = currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null;
+    const lowestFBMPrice = currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null;
+    const amazonPrice = currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null;
+    const offerCount = currentStats[2] || 0;
+    const inStock = currentStats[12] === 1;
+    
+    console.log('Extracted pricing data:', {
+      buyBoxPrice,
+      lowestFBAPrice,
+      lowestFBMPrice,
+      amazonPrice,
+      offerCount,
+      inStock
+    });
     
     // Helper function to safely process price history
     const processPriceHistory = (csvData) => {
@@ -224,22 +262,22 @@ serve(async (req) => {
         category: product.categoryTree?.[product.categoryTree.length - 1]?.name || 'Unknown',
         imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
         
-        buyBoxPrice: product.stats?.current?.[18]?.[1] ? product.stats.current[18][1] / 100 : null,
-        lowestFBAPrice: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null,
-        lowestFBMPrice: product.stats?.current?.[7]?.[1] ? product.stats.current[7][1] / 100 : null,
-        amazonPrice: product.stats?.current?.[1]?.[1] ? product.stats.current[1][1] / 100 : null,
+        buyBoxPrice,
+        lowestFBAPrice,
+        lowestFBMPrice,
+        amazonPrice,
         
         fees: {
           pickAndPackFee: product.fbaFees?.pickAndPackFee ? product.fbaFees.pickAndPackFee / 100 : null,
-          referralFee: product.referralFeePercent ? (product.stats?.current?.[18]?.[1] || 0) * (product.referralFeePercent / 10000) : null,
+          referralFee: product.referralFeePercent ? (buyBoxPrice || 0) * (product.referralFeePercent / 10000) : null,
           storageFee: product.fbaFees?.storageFee ? product.fbaFees.storageFee / 100 : null,
           variableClosingFee: product.variableClosingFee ? product.variableClosingFee / 100 : null,
         },
         
-        offerCount: product.stats?.current?.[2]?.[1] || 0,
+        offerCount,
         estimatedMonthlySales: product.monthlySold || null,
-        inStock: product.stats?.current?.[12]?.[1] === 1,
-        salesRank: product.salesRanks?.[0]?.[1] || null,
+        inStock,
+        salesRank: product.salesRanks?.[0]?.current || null,
         
         priceHistory: processPriceHistory(product.csv),
         
