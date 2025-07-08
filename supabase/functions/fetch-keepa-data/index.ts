@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -184,8 +183,8 @@ serve(async (req) => {
     
     console.log('Final sales rank decision:', salesRank);
 
-    // FIXED FBA PRICE CALCULATION - Using the specified logic
-    console.log('=== FIXED FBA PRICE CALCULATION ===');
+    // ENHANCED FBA PRICE CALCULATION - Enhanced with stock checking
+    console.log('=== ENHANCED FBA PRICE CALCULATION ===');
     let lowestFBAPrice = null;
     
     if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.offers) {
@@ -208,30 +207,47 @@ serve(async (req) => {
         console.log('offer.isFBA:', offer.isFBA);
         console.log('offer.offerCSV exists:', !!offer.offerCSV);
         console.log('offer.offerCSV length:', offer.offerCSV?.length);
+        console.log('offer.stockQty:', offer.stockQty);
+        console.log('offer.availableQty:', offer.availableQty);
         
-        // Filter offers where offer.isFBA === true
-        if (offer.isFBA === true) {
+        // Filter offers where offer.isFBA === true OR offer.isFBA === 1
+        const isFBAOffer = offer.isFBA === true || offer.isFBA === 1;
+        
+        if (isFBAOffer) {
           console.log(`✅ Offer ${i} is FBA`);
           
-          // Filter offers where offer.offerCSV?.length >= 3
-          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
-            console.log(`✅ Offer ${i} has sufficient offerCSV data (${offer.offerCSV.length} items)`);
+          // Check stock availability - consider offer valid if:
+          // 1. No stock info available (assume available)
+          // 2. stockQty > 0
+          // 3. availableQty > 0
+          const hasStock = !offer.stockQty || offer.stockQty > 0 || 
+                          !offer.availableQty || offer.availableQty > 0;
+          
+          if (hasStock) {
+            console.log(`✅ Offer ${i} has stock (stockQty: ${offer.stockQty}, availableQty: ${offer.availableQty})`);
             
-            // Get the 3rd-to-last value: offer.offerCSV[offerCSV.length - 3]
-            const priceIndex = offer.offerCSV.length - 3;
-            const rawPrice = offer.offerCSV[priceIndex];
-            
-            console.log(`Offer ${i} raw price from offerCSV[${priceIndex}]:`, rawPrice);
-            
-            // Filter where price is a number between 1 and 1,000,000
-            if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
-              validFBAPrices.push(rawPrice);
-              console.log(`✅ Offer ${i} has valid price: ${rawPrice} (will be ${rawPrice / 100} USD)`);
+            // Filter offers where offer.offerCSV?.length >= 3
+            if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
+              console.log(`✅ Offer ${i} has sufficient offerCSV data (${offer.offerCSV.length} items)`);
+              
+              // Get the 3rd-to-last value: offer.offerCSV[offerCSV.length - 3]
+              const priceIndex = offer.offerCSV.length - 3;
+              const rawPrice = offer.offerCSV[priceIndex];
+              
+              console.log(`Offer ${i} raw price from offerCSV[${priceIndex}]:`, rawPrice);
+              
+              // Filter where price is a number between 1 and 1,000,000
+              if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
+                validFBAPrices.push(rawPrice);
+                console.log(`✅ Offer ${i} has valid price: ${rawPrice} (will be ${rawPrice / 100} USD)`);
+              } else {
+                console.log(`❌ Offer ${i} price ${rawPrice} is not a valid number between 1 and 1,000,000`);
+              }
             } else {
-              console.log(`❌ Offer ${i} price ${rawPrice} is not a valid number between 1 and 1,000,000`);
+              console.log(`❌ Offer ${i} offerCSV length insufficient:`, offer.offerCSV?.length);
             }
           } else {
-            console.log(`❌ Offer ${i} offerCSV length insufficient:`, offer.offerCSV?.length);
+            console.log(`❌ Offer ${i} has no stock (stockQty: ${offer.stockQty}, availableQty: ${offer.availableQty})`);
           }
         } else {
           console.log(`❌ Offer ${i} is not FBA (isFBA: ${offer.isFBA})`);
@@ -256,7 +272,7 @@ serve(async (req) => {
     }
     
     console.log('Final FBA price decision:', lowestFBAPrice);
-    console.log('=== END FIXED FBA PRICE CALCULATION ===');
+    console.log('=== END ENHANCED FBA PRICE CALCULATION ===');
     
     // IMPROVED OFFER COUNT EXTRACTION
     let offerCount = 0;
