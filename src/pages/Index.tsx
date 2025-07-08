@@ -13,6 +13,7 @@ import { BulkAnalysisTools } from '@/components/BulkAnalysisTools';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
 import { ProductSearch } from '@/components/ProductSearch';
+import { ProductSelector } from '@/components/ProductSelector';
 import { Button } from '@/components/ui/button';
 
 const Index = () => {
@@ -20,7 +21,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState('Dashboard');
   const [searchQuery, setSearchQuery] = useState('');
-  const { product, fetchProduct, loading } = useAmazonProduct();
+  const { product, fetchProduct, loading, multipleProducts, selectProductFromMultiple, clearMultipleProducts } = useAmazonProduct();
 
   const handleConnectAmazonAccount = () => {
     // Generate a random state parameter for security
@@ -54,10 +55,40 @@ const Index = () => {
     if (view === 'Dashboard') {
       setSearchQuery('');
     }
+    // Clear multiple products selection when changing views
+    if (multipleProducts) {
+      clearMultipleProducts();
+    }
+  };
+
+  const handleProductSelection = async (asin: string) => {
+    console.log('User selected product:', asin);
+    await selectProductFromMultiple(asin);
+    setSelectedProduct(asin);
+    setActiveView('Product Analysis Results');
+  };
+
+  const handleBackToSearch = () => {
+    clearMultipleProducts();
+    setSelectedProduct(null);
+    setActiveView('Product Analysis');
   };
 
   const renderActiveView = () => {
     console.log('Rendering active view:', activeView, 'Product:', product);
+    
+    // Show product selector if multiple products were found
+    if (multipleProducts && activeView === 'Product Analysis Results') {
+      return (
+        <ProductSelector
+          upc={multipleProducts.upc}
+          products={multipleProducts.products}
+          totalFound={multipleProducts.totalFound}
+          onSelectProduct={handleProductSelection}
+          onBack={handleBackToSearch}
+        />
+      );
+    }
     
     // Show Amazon product analytics if we have product data and we're showing results
     if (product && activeView === 'Product Analysis Results') {
@@ -103,7 +134,7 @@ const Index = () => {
     }
 
     // Show error state if we tried to fetch a product but failed
-    if (selectedProduct && activeView === 'Product Analysis Results' && !product && !loading) {
+    if (selectedProduct && activeView === 'Product Analysis Results' && !product && !loading && !multipleProducts) {
       return (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">

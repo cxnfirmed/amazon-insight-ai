@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -44,6 +43,18 @@ export const useAmazonProduct = () => {
   const [product, setProduct] = useState<AmazonProduct | null>(null);
   const [loading, setLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [multipleProducts, setMultipleProducts] = useState<{
+    upc: string;
+    products: Array<{
+      asin: string;
+      title: string;
+      monthlySales: number;
+      salesRank: number | null;
+      imageUrl: string | null;
+      price: number | null;
+    }>;
+    totalFound: number;
+  } | null>(null);
   const { toast } = useToast();
 
   // Helper function to detect if input is a UPC (12 digits)
@@ -90,6 +101,7 @@ export const useAmazonProduct = () => {
   const fetchProduct = useCallback(async (input: string, forceFresh = false) => {
     setLoading(true);
     setProduct(null);
+    setMultipleProducts(null);
 
     try {
       const trimmedInput = input.trim();
@@ -149,6 +161,23 @@ export const useAmazonProduct = () => {
         }
         
         throw new Error(errorMessage);
+      }
+
+      // Check if multiple products were found
+      if (keepaResponse.multipleProducts) {
+        console.log('Multiple products found for UPC:', keepaResponse.upc);
+        setMultipleProducts({
+          upc: keepaResponse.upc,
+          products: keepaResponse.products,
+          totalFound: keepaResponse.totalFound
+        });
+        
+        toast({
+          title: "Multiple Products Found",
+          description: `Found ${keepaResponse.totalFound} products with UPC ${keepaResponse.upc}. Please select which one to analyze.`,
+        });
+        
+        return;
       }
 
       const keepaData = keepaResponse.data;
@@ -243,6 +272,12 @@ export const useAmazonProduct = () => {
     }
   }, [toast, isUpc, isAsin]);
 
+  const selectProductFromMultiple = useCallback(async (asin: string) => {
+    console.log('User selected ASIN from multiple options:', asin);
+    setMultipleProducts(null);
+    await fetchProduct(asin, true);
+  }, [fetchProduct]);
+
   return {
     product,
     loading,
@@ -250,6 +285,9 @@ export const useAmazonProduct = () => {
     setDebugMode,
     fetchProduct,
     setProduct,
-    convertUpcToAsin
+    convertUpcToAsin,
+    multipleProducts,
+    selectProductFromMultiple,
+    clearMultipleProducts: () => setMultipleProducts(null)
   };
 };
