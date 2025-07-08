@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -593,6 +594,7 @@ serve(async (req) => {
       ];
       
       let conversionSuccessful = false;
+      let bestProduct = null;
       
       for (const upcFormat of upcFormats) {
         if (conversionSuccessful) break;
@@ -602,7 +604,6 @@ serve(async (req) => {
         // Try both productfinder and product-finder endpoints
         const urls = [
           `https://api.keepa.com/productfinder?key=${keepaApiKey}&domain=${domain}&codes=${upcFormat}`,
-          `https://api.keepa.com/product-finder?key=${keepaApiKey}&domain=${domain}&codes=${upcFormat}`,
           `https://api.keepa.com/productfinder?key=${keepaApiKey}&domain=${domain}&code=${upcFormat}`,
         ];
         
@@ -621,14 +622,73 @@ serve(async (req) => {
               });
               
               if (finderData.products && finderData.products.length > 0) {
-                finalAsin = finderData.products[0].asin;
+                console.log(`Found ${finderData.products.length} products for UPC ${upcFormat}`);
+                
+                // If multiple products found, select the one with highest monthly sales
+                if (finderData.products.length > 1) {
+                  console.log('Multiple products found, selecting one with highest monthly sales...');
+                  
+                  // Sort products by monthly sales (descending)
+                  const productsWithSales = finderData.products.map(product => {
+                    let monthlySales = 0;
+                    
+                    // Try to extract monthly sales from various sources
+                    if (product.monthlySold && product.monthlySold > 0) {
+                      monthlySales = product.monthlySold;
+                    } else if (product.stats?.sales30 && product.stats.sales30 > 0) {
+                      monthlySales = product.stats.sales30;
+                    } else if (product.stats?.sales90 && product.stats.sales90 > 0) {
+                      monthlySales = Math.round(product.stats.sales90 / 3);
+                    } else if (product.stats?.buyBoxShipped30 && product.stats.buyBoxShipped30 > 0) {
+                      monthlySales = product.stats.buyBoxShipped30;
+                    } else if (product.stats?.salesRankDrops30 && product.stats.salesRankDrops30 > 0) {
+                      monthlySales = Math.min(product.stats.salesRankDrops30 * 2, 1000);
+                    }
+                    
+                    return {
+                      ...product,
+                      calculatedMonthlySales: monthlySales
+                    };
+                  });
+                  
+                  // Sort by monthly sales (highest first)
+                  productsWithSales.sort((a, b) => b.calculatedMonthlySales - a.calculatedMonthlySales);
+                  
+                  bestProduct = productsWithSales[0];
+                  console.log(`Selected product with highest monthly sales:`, {
+                    asin: bestProduct.asin,
+                    title: bestProduct.title,
+                    monthlySales: bestProduct.calculatedMonthlySales
+                  });
+                  
+                  // Log all products for debugging
+                  console.log('All products ranked by monthly sales:', 
+                    productsWithSales.map(p => ({
+                      asin: p.asin,
+                      title: p.title?.substring(0, 50) + '...',
+                      monthlySales: p.calculatedMonthlySales
+                    }))
+                  );
+                } else {
+                  // Only one product found
+                  bestProduct = finderData.products[0];
+                  console.log(`Single product found: ${bestProduct.asin}`);
+                }
+                
+                finalAsin = bestProduct.asin;
                 upcConversionInfo = {
                   originalUpc: asin,
                   convertedAsin: finalAsin,
-                  tokensUsed: finderData.tokensConsumed || 1
+                  tokensUsed: finderData.tokensConsumed || 1,
+                  totalProductsFound: finderData.products.length,
+                  selectedProduct: {
+                    asin: bestProduct.asin,
+                    title: bestProduct.title,
+                    monthlySales: bestProduct.calculatedMonthlySales || null
+                  }
                 };
                 
-                console.log(`UPC ${asin} successfully converted to ASIN: ${finalAsin}`);
+                console.log(`UPC ${asin} successfully converted to ASIN: ${finalAsin} (selected from ${finderData.products.length} products)`);
                 conversionSuccessful = true;
                 break;
               }
@@ -652,11 +712,32 @@ serve(async (req) => {
           if (directResponse.ok) {
             const directData = await directResponse.json();
             if (directData.products && directData.products.length > 0) {
-              finalAsin = directData.products[0].asin;
+              // Apply same logic for multiple products in direct search
+              if (directData.products.length > 1) {
+                console.log(`Direct search found ${directData.products.length} products, selecting best one...`);
+                
+                const productsWithSales = directData.products.map(product => {
+                  const monthlySales = extractMonthlySales(product) || 0;
+                  return { ...product, calculatedMonthlySales: monthlySales };
+                });
+                
+                productsWithSales.sort((a, b) => b.calculatedMonthlySales - a.calculatedMonthlySales);
+                bestProduct = productsWithSales[0];
+              } else {
+                bestProduct = directData.products[0];
+              }
+              
+              finalAsin = bestProduct.asin;
               upcConversionInfo = {
                 originalUpc: asin,
                 convertedAsin: finalAsin,
-                tokensUsed: 1
+                tokensUsed: 1,
+                totalProductsFound: directData.products.length,
+                selectedProduct: {
+                  asin: bestProduct.asin,
+                  title: bestProduct.title,
+                  monthlySales: bestProduct.calculatedMonthlySales || null
+                }
               };
               console.log(`Direct UPC search successful: ${finalAsin}`);
               conversionSuccessful = true;
