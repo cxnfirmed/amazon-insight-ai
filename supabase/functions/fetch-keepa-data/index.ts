@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -155,27 +154,48 @@ serve(async (req) => {
     const currentStats = product.stats?.current || {};
     console.log('Current stats raw:', currentStats);
     
-    // IMPROVED SALES RANK EXTRACTION
+    // IMPROVED SALES RANK EXTRACTION - prioritize most recent data
     let salesRank = null;
     
-    // Method 1: Extract from salesRanks array (most reliable)
+    // Method 1: Extract from salesRanks array - get the most current one
     if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
       console.log('Checking salesRanks array:', product.salesRanks);
       
-      // Look for the main category rank (usually the first valid one)
-      for (const rankEntry of product.salesRanks) {
+      // Sort by lastUpdate to get the most recent rank, then find the first valid one
+      const sortedRanks = [...product.salesRanks].sort((a, b) => {
+        const timeA = a.lastUpdate || 0;
+        const timeB = b.lastUpdate || 0;
+        return timeB - timeA; // Most recent first
+      });
+      
+      for (const rankEntry of sortedRanks) {
         if (rankEntry && typeof rankEntry.current === 'number' && rankEntry.current > 0) {
           salesRank = rankEntry.current;
-          console.log('Found sales rank from salesRanks:', salesRank, 'Category:', rankEntry.categoryId);
+          console.log('Found sales rank from salesRanks (most recent):', salesRank, 'Category:', rankEntry.categoryId, 'LastUpdate:', rankEntry.lastUpdate);
           break;
         }
       }
     }
     
-    // Method 2: Fallback to stats.current[0] if no salesRanks found
+    // Method 2: If no valid salesRanks, check if there's a more recent rank in CSV data
+    if (!salesRank && product.csv && Array.isArray(product.csv) && product.csv.length >= 2) {
+      // Keepa CSV format: [timestamp1, rank1, timestamp2, rank2, ...]
+      // Get the most recent rank (last pair)
+      console.log('Checking CSV data for most recent sales rank...');
+      for (let i = product.csv.length - 1; i >= 1; i -= 2) {
+        const rank = product.csv[i];
+        if (typeof rank === 'number' && rank > 0 && rank !== -1) {
+          salesRank = rank;
+          console.log('Found sales rank from CSV data (most recent):', salesRank);
+          break;
+        }
+      }
+    }
+    
+    // Method 3: Fallback to stats.current[0] if no other source found
     if (!salesRank && currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
       salesRank = currentStats[0];
-      console.log('Using sales rank from stats.current[0]:', salesRank);
+      console.log('Using sales rank from stats.current[0] (fallback):', salesRank);
     }
     
     console.log('Final sales rank:', salesRank);
