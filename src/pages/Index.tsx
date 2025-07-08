@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { AmazonProductAnalytics } from '@/components/AmazonProductAnalytics';
 import { Dashboard } from '@/components/Dashboard';
@@ -12,6 +13,7 @@ import { useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { BulkAnalysisTools } from '@/components/BulkAnalysisTools';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
+import { ProductSearch } from '@/components/ProductSearch';
 import { Button } from '@/components/ui/button';
 
 const Index = () => {
@@ -46,7 +48,7 @@ const Index = () => {
         console.log('Valid ASIN/UPC detected, fetching fresh product data...');
         // Force fresh fetch when user searches
         await fetchProduct(query, true);
-        setActiveView('Product Analysis');
+        setActiveView('Product Analysis Results');
         setSelectedProduct(query);
       } else {
         // Otherwise show search results in dashboard
@@ -59,22 +61,22 @@ const Index = () => {
   const renderActiveView = () => {
     console.log('Rendering active view:', activeView, 'Product:', product);
     
-    // Show Amazon product analytics if we have product data
-    if (product && activeView === 'Product Analysis') {
+    // Show Amazon product analytics if we have product data and we're showing results
+    if (product && activeView === 'Product Analysis Results') {
       console.log('Showing AmazonProductAnalytics with product:', product.title);
       return (
         <AmazonProductAnalytics 
           product={product}
           onBack={() => {
             setSelectedProduct(null);
-            setActiveView('Dashboard');
+            setActiveView('Product Analysis');
           }}
         />
       );
     }
 
     // Show loading state while fetching product data
-    if (loading && activeView === 'Product Analysis') {
+    if (loading && activeView === 'Product Analysis Results') {
       return (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
@@ -86,7 +88,7 @@ const Index = () => {
     }
 
     // Show error state if we tried to fetch a product but failed
-    if (selectedProduct && activeView === 'Product Analysis' && !product && !loading) {
+    if (selectedProduct && activeView === 'Product Analysis Results' && !product && !loading) {
       return (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
@@ -99,11 +101,11 @@ const Index = () => {
             <button 
               onClick={() => {
                 setSelectedProduct(null);
-                setActiveView('Dashboard');
+                setActiveView('Product Analysis');
               }}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
-              Back to Dashboard
+              Back to Product Search
             </button>
           </div>
         </div>
@@ -111,6 +113,8 @@ const Index = () => {
     }
 
     switch (activeView) {
+      case 'Product Analysis':
+        return <ProductSearch onSearch={handleSearch} />;
       case 'FBA Calculator':
         return <ProfitabilityCalculator />;
       case 'AI Insights':
