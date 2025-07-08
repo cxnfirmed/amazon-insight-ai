@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -112,13 +113,13 @@ serve(async (req) => {
       console.log('Multiple products found for UPC:', trimmedInput);
       
       const productChoices = data.products.slice(0, 10).map(product => {
+        // Extract sales rank properly
         let salesRank = null;
-        if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
-          for (const rankEntry of product.salesRanks) {
-            if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
-              salesRank = rankEntry.current;
-              break;
-            }
+        if (product.salesRanks && Array.isArray(product.salesRanks)) {
+          // Look for the main category (usually categoryId 0 or the first one)
+          const mainCategoryRank = product.salesRanks.find(rank => rank && typeof rank.current === 'number' && rank.current > 0);
+          if (mainCategoryRank) {
+            salesRank = mainCategoryRank.current;
           }
         }
         
@@ -146,62 +147,109 @@ serve(async (req) => {
     // Process single product result
     const product = data.products[0];
     console.log('Processing product:', product.asin);
+    console.log('Product salesRanks structure:', product.salesRanks);
     console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
-    console.log('Product salesRanks:', product.salesRanks);
+    console.log('Product offers structure:', product.liveOffersOrder ? product.liveOffersOrder.length : 'No live offers');
     
     // Extract current prices from the stats object
     const currentStats = product.stats?.current || {};
     console.log('Current stats raw:', currentStats);
     
-    // Extract sales rank properly from salesRanks array
+    // IMPROVED SALES RANK EXTRACTION
     let salesRank = null;
+    
+    // Method 1: Extract from salesRanks array (most reliable)
     if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
-      // Look for the first sales rank entry that has a current value
+      console.log('Checking salesRanks array:', product.salesRanks);
+      
+      // Look for the main category rank (usually the first valid one)
       for (const rankEntry of product.salesRanks) {
-        if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
+        if (rankEntry && typeof rankEntry.current === 'number' && rankEntry.current > 0) {
           salesRank = rankEntry.current;
-          console.log('Found sales rank:', salesRank);
+          console.log('Found sales rank from salesRanks:', salesRank, 'Category:', rankEntry.categoryId);
           break;
         }
       }
     }
     
-    // Extract offer count - try multiple sources in order of preference
-    let offerCount = 0;
-    // First try stats.current[2] (New offers count)
-    if (currentStats[2] !== undefined && currentStats[2] !== null && currentStats[2] !== -1) {
-      offerCount = currentStats[2];
+    // Method 2: Fallback to stats.current[0] if no salesRanks found
+    if (!salesRank && currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
+      salesRank = currentStats[0];
+      console.log('Using sales rank from stats.current[0]:', salesRank);
     }
-    // Fallback to offerCountNew
+    
+    console.log('Final sales rank:', salesRank);
+    
+    // IMPROVED OFFER COUNT EXTRACTION
+    let offerCount = 0;
+    
+    // Method 1: Check live offers first (most accurate)
+    if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
+      offerCount = product.liveOffersOrder.length;
+      console.log('Offer count from liveOffersOrder:', offerCount);
+    }
+    // Method 2: Check stats.current[2] (New offers count)
+    else if (currentStats[2] !== undefined && currentStats[2] !== null && currentStats[2] !== -1) {
+      offerCount = currentStats[2];
+      console.log('Offer count from stats.current[2]:', offerCount);
+    }
+    // Method 3: Fallback to offerCountNew
     else if (product.offerCountNew !== undefined && product.offerCountNew !== null && product.offerCountNew !== -1) {
       offerCount = product.offerCountNew;
-    }
-    // Try looking at live offers data if available
-    else if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
-      offerCount = product.liveOffersOrder.length;
+      console.log('Offer count from offerCountNew:', offerCount);
     }
     
-    // Stock status - be more intelligent about determining stock status
-    let inStock = true; // Default to true unless we have clear indication it's out of stock
-    // Check if the buy box price exists and is valid
-    if (currentStats[18] === undefined || currentStats[18] === null || currentStats[18] === -1) {
-      // No buy box price might indicate out of stock, but check other indicators
-      if (offerCount === 0 && (currentStats[0] === undefined || currentStats[0] === -1)) {
-        inStock = false;
+    console.log('Final offer count:', offerCount);
+    
+    // IMPROVED STOCK STATUS DETERMINATION
+    let inStock = false;
+    
+    // Method 1: Check live offers for actual stock availability
+    if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.liveOffersOrder.length > 0) {
+      console.log('Checking live offers for stock status...');
+      
+      // Check if any offer is shippable and has stock
+      for (const offer of product.liveOffersOrder) {
+        if (offer && offer.isShippable !== false) {
+          // If we have stock information and it's > 0, or if we don't have stock info but offer is shippable
+          if (!offer.stock || offer.stock > 0) {
+            inStock = true;
+            console.log('Found in-stock offer:', offer);
+            break;
+          }
+        }
       }
     }
-    // Override with explicit stock indicator if available (currentStats[12])
-    if (currentStats[12] !== undefined) {
-      inStock = currentStats[12] === 1;
+    
+    // Method 2: Check if we have a valid buy box price (indicates availability)
+    if (!inStock && currentStats[18] !== undefined && currentStats[18] !== null && currentStats[18] !== -1) {
+      inStock = true;
+      console.log('Buy box price exists, assuming in stock');
     }
     
-    console.log('Extracted data:', {
+    // Method 3: Check if we have any FBA offers
+    if (!inStock && currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
+      inStock = true;
+      console.log('FBA price exists, assuming in stock');
+    }
+    
+    // Method 4: Explicit stock indicator from stats (if available)
+    if (currentStats[12] !== undefined) {
+      const explicitStock = currentStats[12] === 1;
+      console.log('Explicit stock indicator:', explicitStock);
+      inStock = explicitStock;
+    }
+    
+    console.log('Final stock status:', inStock);
+    
+    // Log the final extracted data for debugging
+    console.log('Extracted data summary:', {
       salesRank,
       offerCount,
       inStock,
       buyBoxPrice: currentStats[18],
       lowestFBAPrice: currentStats[0],
-      stockIndicator: currentStats[12]
+      liveOffersCount: product.liveOffersOrder?.length || 0
     });
     
     // Helper function to safely process price history
