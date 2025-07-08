@@ -143,22 +143,34 @@ serve(async (req) => {
     const product = data.products[0];
     console.log('Processing product:', product.asin);
     
-    // Enhanced CSV data logging for chart functionality
-    console.log('=== CSV DATA STRUCTURE FOR CHART ===');
-    console.log('Product csv array exists:', !!product.csv);
-    console.log('Product csv array length:', product.csv?.length);
-    if (product.csv && product.csv.length > 0) {
-      console.log('First 20 CSV items:', product.csv.slice(0, 20));
-      console.log('CSV data structure - timestamps and values should alternate');
+    // CORRECTED CSV DATA STRUCTURE LOGGING
+    console.log('=== CORRECTED CSV DATA STRUCTURE FOR CHART ===');
+    console.log('Product csv object exists:', !!product.csv);
+    console.log('Product csv is object:', typeof product.csv === 'object' && product.csv !== null);
+    
+    if (product.csv && typeof product.csv === 'object') {
+      const csvKeys = Object.keys(product.csv);
+      console.log('CSV object keys:', csvKeys);
       
-      // Log sample data points for verification
-      for (let i = 0; i < Math.min(10, product.csv.length); i += 2) {
-        const timestamp = product.csv[i];
-        const values = product.csv[i + 1];
-        console.log(`CSV[${i}] timestamp: ${timestamp}, values array:`, values);
+      // Log specific series data for debugging
+      if (product.csv[0]) console.log('Amazon series (csv[0]) length:', product.csv[0]?.length);
+      if (product.csv[3]) console.log('Buy Box series (csv[3]) length:', product.csv[3]?.length);
+      if (product.csv[16]) console.log('FBA series (csv[16]) length:', product.csv[16]?.length);
+      if (product.csv[18]) console.log('FBM series (csv[18]) length:', product.csv[18]?.length);
+      
+      // Log sample data from Buy Box series to verify structure
+      if (product.csv[3] && product.csv[3].length > 0) {
+        console.log('Buy Box series sample (first 10 values):', product.csv[3].slice(0, 10));
       }
+      
+      // Log sample data from FBA series
+      if (product.csv[16] && product.csv[16].length > 0) {
+        console.log('FBA series sample (first 10 values):', product.csv[16].slice(0, 10));
+      }
+    } else {
+      console.log('❌ CSV data is not in expected object format');
     }
-    console.log('=== END CSV DATA STRUCTURE ===');
+    console.log('=== END CORRECTED CSV DATA STRUCTURE ===');
 
     // Extract current prices from the stats object
     const currentStats = product.stats?.current || {};
@@ -419,58 +431,6 @@ serve(async (req) => {
       liveOffersCount: product.liveOffersOrder?.length || 0
     });
     
-    // Enhanced price history processing for the interactive chart
-    const processEnhancedPriceHistory = (csvData) => {
-      if (!csvData || !Array.isArray(csvData) || csvData.length === 0) {
-        console.log('No CSV data for enhanced price history');
-        return [];
-      }
-      
-      try {
-        const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
-        const historyPoints = [];
-        
-        // Process CSV data in pairs (timestamp, values array)
-        for (let i = 0; i < csvData.length; i += 2) {
-          const timestampMinutes = csvData[i];
-          const values = csvData[i + 1];
-          
-          // Skip invalid timestamps
-          if (typeof timestampMinutes !== 'number' || timestampMinutes < 0 || !Array.isArray(values)) {
-            continue;
-          }
-          
-          const timestamp = new Date(keepaEpoch + (timestampMinutes * 60 * 1000));
-          
-          // Validate the resulting date
-          if (isNaN(timestamp.getTime())) {
-            continue;
-          }
-          
-          // Extract values based on Keepa indices
-          const historyPoint = {
-            timestamp: timestamp.toISOString(),
-            amazonPrice: values[0] && values[0] !== -1 ? values[0] / 100 : null,
-            fbaPrice: values[1] && values[1] !== -1 ? values[1] / 100 : null,
-            fbmPrice: values[3] && values[3] !== -1 ? values[3] / 100 : null,
-            buyBoxPrice: values[4] && values[4] !== -1 ? values[4] / 100 : null,
-            salesRank: values[5] && values[5] !== -1 ? values[5] : null,
-            offerCount: values[20] && values[20] !== -1 ? values[20] : null,
-            rating: values[42] && values[42] !== -1 ? values[42] / 10 : null,
-            reviewCount: values[44] && values[44] !== -1 ? values[44] : null,
-          };
-          
-          historyPoints.push(historyPoint);
-        }
-        
-        console.log('Enhanced price history processed:', historyPoints.length, 'points');
-        return historyPoints;
-      } catch (error) {
-        console.error('Error processing enhanced price history:', error);
-        return [];
-      }
-    };
-    
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -501,10 +461,7 @@ serve(async (req) => {
         reviewRating: reviewRating,
         reviewCount: reviewCount,
         
-        // Enhanced price history for the interactive chart
-        priceHistory: processEnhancedPriceHistory(product.csv),
-        
-        // Raw CSV data for the interactive chart component
+        // CORRECTED: Return raw CSV data directly from Keepa without any processing
         csv: product.csv,
         
         tokensUsed: data.tokensUsed || 0,
