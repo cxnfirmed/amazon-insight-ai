@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -38,8 +39,6 @@ export interface AmazonProduct {
     originalUpc: string;
     convertedAsin: string;
   };
-  review_rating: number | null;
-  review_count: number | null;
 }
 
 export const useAmazonProduct = () => {
@@ -214,9 +213,7 @@ export const useAmazonProduct = () => {
         // Metadata
         last_updated: keepaData.lastUpdate,
         data_source: 'Keepa',
-        debug_data: keepaResponse,
-        review_rating: keepaData.reviewRating,
-        review_count: keepaData.reviewCount
+        debug_data: keepaResponse
       };
 
       console.log('Product data processed successfully:', productData.title);
@@ -254,9 +251,7 @@ export const useAmazonProduct = () => {
         sales_rank: null,
         last_updated: null,
         data_source: 'Error',
-        debug_data: { error: error.message },
-        review_rating: null,
-        review_count: null
+        debug_data: { error: error.message }
       };
       
       setProduct(errorProduct);
