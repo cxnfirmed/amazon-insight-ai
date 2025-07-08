@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -44,30 +45,61 @@ serve(async (req) => {
     if (isUpc) {
       console.log(`UPC search detected: ${asin}`);
       
-      // Use the correct productFinder API endpoint - it's a POST request with JSON body
-      const finderUrl = `https://api.keepa.com/productFinder/?key=${keepaApiKey}&domain=1`;
-      const finderRequestBody = {
-        type: "product",
-        selection: {
-          upc: asin
-        }
-      };
+      // Use the correct productFinder API endpoint with proper format
+      const finderUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${asin}&history=0&stats=0`;
       
       console.log('Calling productFinder with URL:', finderUrl);
-      console.log('Request body:', JSON.stringify(finderRequestBody, null, 2));
       
-      const finderResponse = await fetch(finderUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(finderRequestBody)
-      });
+      const finderResponse = await fetch(finderUrl);
       
       // Check if response is ok before parsing
       if (!finderResponse.ok) {
         console.error('ProductFinder API error:', finderResponse.status, finderResponse.statusText);
-        throw new Error(`Keepa productFinder API error: ${finderResponse.status} ${finderResponse.statusText}`);
+        
+        // Try alternative approach - search by UPC using the product endpoint
+        console.log('Trying alternative UPC search approach...');
+        const alternativeUrl = `https://api.keepa.com/query?key=${keepaApiKey}&domain=1&type=product&selection=%7B%22upc%22%3A%22${asin}%22%7D`;
+        
+        const altResponse = await fetch(alternativeUrl);
+        
+        if (!altResponse.ok) {
+          throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
+        }
+        
+        const altResponseText = await altResponse.text();
+        console.log('Alternative search raw response:', altResponseText);
+        
+        let altData;
+        try {
+          altData = JSON.parse(altResponseText);
+        } catch (jsonError) {
+          console.error('Failed to parse alternative response as JSON:', jsonError);
+          throw new Error(`UPC ${asin} search failed - invalid response format`);
+        }
+        
+        if (!altData.products || altData.products.length === 0) {
+          throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
+        }
+        
+        // Process alternative response
+        const productChoices = altData.products.slice(0, 10).map(product => ({
+          asin: product.asin,
+          title: product.title || 'Unknown Product',
+          monthlySales: product.monthlySold || 0,
+          salesRank: product.salesRanks?.[0]?.[1] || null,
+          imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
+          price: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null
+        }));
+        
+        return new Response(JSON.stringify({
+          success: true,
+          multipleProducts: true,
+          upc: asin,
+          products: productChoices,
+          totalFound: altData.products.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
       
       // Get response text first to check if it's valid JSON
@@ -85,48 +117,72 @@ serve(async (req) => {
       
       console.log('ProductFinder parsed response:', JSON.stringify(finderData, null, 2));
       
-      if (!finderData.asinList || finderData.asinList.length === 0) {
+      if (!finderData.products || finderData.products.length === 0) {
         throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
       }
 
-      // Get detailed product info for each ASIN
-      const productChoices = [];
-      
-      for (const foundAsin of finderData.asinList.slice(0, 10)) { // Limit to 10 results
-        try {
-          const productUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${foundAsin}&stats=1&history=1`;
-          const productResponse = await fetch(productUrl);
-          
-          if (!productResponse.ok) {
-            console.log(`Product API error for ASIN ${foundAsin}:`, productResponse.status, productResponse.statusText);
-            continue;
+      // If only one product found, return it directly
+      if (finderData.products.length === 1) {
+        const product = finderData.products[0];
+        
+        return new Response(JSON.stringify({
+          success: true,
+          data: {
+            asin: product.asin,
+            title: product.title || 'Product title not available',
+            manufacturer: product.manufacturer || null,
+            category: product.categoryTree?.[product.categoryTree.length - 1]?.name || 'Unknown',
+            imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
+            
+            buyBoxPrice: product.stats?.current?.[18]?.[1] ? product.stats.current[18][1] / 100 : null,
+            lowestFBAPrice: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null,
+            lowestFBMPrice: product.stats?.current?.[7]?.[1] ? product.stats.current[7][1] / 100 : null,
+            amazonPrice: product.stats?.current?.[1]?.[1] ? product.stats.current[1][1] / 100 : null,
+            
+            fees: {
+              pickAndPackFee: product.fbaFees?.pickAndPackFee ? product.fbaFees.pickAndPackFee / 100 : null,
+              referralFee: product.referralFeePercent ? (product.stats?.current?.[18]?.[1] || 0) * (product.referralFeePercent / 10000) : null,
+              storageFee: product.fbaFees?.storageFee ? product.fbaFees.storageFee / 100 : null,
+              variableClosingFee: product.variableClosingFee ? product.variableClosingFee / 100 : null,
+            },
+            
+            offerCount: product.stats?.current?.[2]?.[1] || 0,
+            estimatedMonthlySales: product.monthlySold || null,
+            inStock: product.stats?.current?.[12]?.[1] === 1,
+            salesRank: product.salesRanks?.[0]?.[1] || null,
+            
+            priceHistory: product.csv ? [{
+              timestamp: new Date(product.csv[0] * 60000 + new Date('2011-01-01').getTime()).toISOString(),
+              buyBoxPrice: product.csv[18] !== -1 ? product.csv[18] / 100 : null,
+              amazonPrice: product.csv[1] !== -1 ? product.csv[1] / 100 : null,
+              newPrice: product.csv[0] !== -1 ? product.csv[0] / 100 : null,
+              salesRank: product.csv[3] !== -1 ? product.csv[3] : null,
+              offerCount: product.csv[2] !== -1 ? product.csv[2] : null,
+            }] : [],
+            
+            tokensUsed: finderData.tokensUsed || 0,
+            tokensLeft: finderData.tokensLeft || 0,
+            processingTime: finderData.processingTime || 0,
+            lastUpdate: new Date().toISOString(),
+            upcConversion: {
+              originalUpc: asin,
+              convertedAsin: product.asin
+            }
           }
-          
-          const productResponseText = await productResponse.text();
-          let productData;
-          
-          try {
-            productData = JSON.parse(productResponseText);
-          } catch (jsonError) {
-            console.log(`Failed to parse product response for ASIN ${foundAsin}:`, jsonError);
-            continue;
-          }
-          
-          if (productData.products && productData.products.length > 0) {
-            const product = productData.products[0];
-            productChoices.push({
-              asin: foundAsin,
-              title: product.title || 'Unknown Product',
-              monthlySales: product.monthlySold || 0,
-              salesRank: product.salesRanks?.[0]?.[1] || null,
-              imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
-              price: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null
-            });
-          }
-        } catch (error) {
-          console.log(`Error fetching details for ASIN ${foundAsin}:`, error);
-        }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
+
+      // Multiple products found - return selection list
+      const productChoices = finderData.products.slice(0, 10).map(product => ({
+        asin: product.asin,
+        title: product.title || 'Unknown Product',
+        monthlySales: product.monthlySold || 0,
+        salesRank: product.salesRanks?.[0]?.[1] || null,
+        imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
+        price: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null
+      }));
       
       // Return multiple products for user selection
       return new Response(JSON.stringify({
@@ -134,7 +190,7 @@ serve(async (req) => {
         multipleProducts: true,
         upc: asin,
         products: productChoices,
-        totalFound: finderData.asinList.length
+        totalFound: finderData.products.length
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
