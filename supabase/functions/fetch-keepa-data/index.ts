@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -41,89 +40,42 @@ serve(async (req) => {
 
     console.log(`Processing request for: ${asin}, isUpc: ${isUpc}`);
 
-    // If it's a UPC search, use productFinder to get all matching products
+    // If it's a UPC search, use product endpoint with code parameter
     if (isUpc) {
       console.log(`UPC search detected: ${asin}`);
       
-      // Use the correct productFinder API endpoint with proper format
-      const finderUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${asin}&history=0&stats=0`;
+      // Use the product endpoint with code parameter for UPC lookup
+      const upcUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${asin}&history=0&stats=1`;
       
-      console.log('Calling productFinder with URL:', finderUrl);
+      console.log('Calling Keepa API for UPC with URL:', upcUrl);
       
-      const finderResponse = await fetch(finderUrl);
+      const upcResponse = await fetch(upcUrl);
       
-      // Check if response is ok before parsing
-      if (!finderResponse.ok) {
-        console.error('ProductFinder API error:', finderResponse.status, finderResponse.statusText);
-        
-        // Try alternative approach - search by UPC using the product endpoint
-        console.log('Trying alternative UPC search approach...');
-        const alternativeUrl = `https://api.keepa.com/query?key=${keepaApiKey}&domain=1&type=product&selection=%7B%22upc%22%3A%22${asin}%22%7D`;
-        
-        const altResponse = await fetch(alternativeUrl);
-        
-        if (!altResponse.ok) {
-          throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
-        }
-        
-        const altResponseText = await altResponse.text();
-        console.log('Alternative search raw response:', altResponseText);
-        
-        let altData;
-        try {
-          altData = JSON.parse(altResponseText);
-        } catch (jsonError) {
-          console.error('Failed to parse alternative response as JSON:', jsonError);
-          throw new Error(`UPC ${asin} search failed - invalid response format`);
-        }
-        
-        if (!altData.products || altData.products.length === 0) {
-          throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
-        }
-        
-        // Process alternative response
-        const productChoices = altData.products.slice(0, 10).map(product => ({
-          asin: product.asin,
-          title: product.title || 'Unknown Product',
-          monthlySales: product.monthlySold || 0,
-          salesRank: product.salesRanks?.[0]?.[1] || null,
-          imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
-          price: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null
-        }));
-        
-        return new Response(JSON.stringify({
-          success: true,
-          multipleProducts: true,
-          upc: asin,
-          products: productChoices,
-          totalFound: altData.products.length
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+      if (!upcResponse.ok) {
+        console.error('UPC API error:', upcResponse.status, upcResponse.statusText);
+        throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
       }
       
-      // Get response text first to check if it's valid JSON
-      const finderResponseText = await finderResponse.text();
-      console.log('ProductFinder raw response:', finderResponseText);
+      const upcResponseText = await upcResponse.text();
+      console.log('UPC API raw response:', upcResponseText);
       
-      let finderData;
+      let upcData;
       try {
-        finderData = JSON.parse(finderResponseText);
+        upcData = JSON.parse(upcResponseText);
       } catch (jsonError) {
-        console.error('Failed to parse productFinder response as JSON:', jsonError);
-        console.error('Response text:', finderResponseText);
-        throw new Error(`Invalid JSON response from Keepa productFinder API: ${jsonError.message}`);
+        console.error('Failed to parse UPC response as JSON:', jsonError);
+        throw new Error(`UPC ${asin} search failed - invalid response format`);
       }
       
-      console.log('ProductFinder parsed response:', JSON.stringify(finderData, null, 2));
+      console.log('UPC API parsed response:', JSON.stringify(upcData, null, 2));
       
-      if (!finderData.products || finderData.products.length === 0) {
+      if (!upcData.products || upcData.products.length === 0) {
         throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
       }
 
       // If only one product found, return it directly
-      if (finderData.products.length === 1) {
-        const product = finderData.products[0];
+      if (upcData.products.length === 1) {
+        const product = upcData.products[0];
         
         return new Response(JSON.stringify({
           success: true,
@@ -151,18 +103,11 @@ serve(async (req) => {
             inStock: product.stats?.current?.[12]?.[1] === 1,
             salesRank: product.salesRanks?.[0]?.[1] || null,
             
-            priceHistory: product.csv ? [{
-              timestamp: new Date(product.csv[0] * 60000 + new Date('2011-01-01').getTime()).toISOString(),
-              buyBoxPrice: product.csv[18] !== -1 ? product.csv[18] / 100 : null,
-              amazonPrice: product.csv[1] !== -1 ? product.csv[1] / 100 : null,
-              newPrice: product.csv[0] !== -1 ? product.csv[0] / 100 : null,
-              salesRank: product.csv[3] !== -1 ? product.csv[3] : null,
-              offerCount: product.csv[2] !== -1 ? product.csv[2] : null,
-            }] : [],
+            priceHistory: [],
             
-            tokensUsed: finderData.tokensUsed || 0,
-            tokensLeft: finderData.tokensLeft || 0,
-            processingTime: finderData.processingTime || 0,
+            tokensUsed: upcData.tokensUsed || 0,
+            tokensLeft: upcData.tokensLeft || 0,
+            processingTime: upcData.processingTime || 0,
             lastUpdate: new Date().toISOString(),
             upcConversion: {
               originalUpc: asin,
@@ -175,7 +120,7 @@ serve(async (req) => {
       }
 
       // Multiple products found - return selection list
-      const productChoices = finderData.products.slice(0, 10).map(product => ({
+      const productChoices = upcData.products.slice(0, 10).map(product => ({
         asin: product.asin,
         title: product.title || 'Unknown Product',
         monthlySales: product.monthlySold || 0,
@@ -184,13 +129,12 @@ serve(async (req) => {
         price: product.stats?.current?.[0]?.[1] ? product.stats.current[0][1] / 100 : null
       }));
       
-      // Return multiple products for user selection
       return new Response(JSON.stringify({
         success: true,
         multipleProducts: true,
         upc: asin,
         products: productChoices,
-        totalFound: finderData.products.length
+        totalFound: upcData.products.length
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -207,7 +151,6 @@ serve(async (req) => {
       throw new Error(`Keepa API error: ${response.status} ${response.statusText}`);
     }
     
-    // Get response text first to check if it's valid JSON
     const responseText = await response.text();
     console.log('Product API raw response length:', responseText.length);
     
@@ -225,6 +168,52 @@ serve(async (req) => {
     }
 
     const product = data.products[0];
+    
+    // Helper function to safely process price history
+    const processPriceHistory = (csvData) => {
+      if (!csvData || !Array.isArray(csvData) || csvData.length === 0) {
+        return [];
+      }
+      
+      try {
+        // Keepa timestamps are in minutes since 2011-01-01
+        const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
+        
+        // Process only the first few data points to avoid overwhelming the response
+        const historyPoints = [];
+        const maxPoints = 5;
+        
+        for (let i = 0; i < Math.min(csvData.length, maxPoints); i++) {
+          const timestampMinutes = csvData[i];
+          
+          // Skip invalid timestamps
+          if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
+            continue;
+          }
+          
+          const timestamp = new Date(keepaEpoch + (timestampMinutes * 60 * 1000));
+          
+          // Validate the resulting date
+          if (isNaN(timestamp.getTime())) {
+            continue;
+          }
+          
+          historyPoints.push({
+            timestamp: timestamp.toISOString(),
+            buyBoxPrice: null,
+            amazonPrice: null,
+            newPrice: null,
+            salesRank: null,
+            offerCount: null,
+          });
+        }
+        
+        return historyPoints;
+      } catch (error) {
+        console.error('Error processing price history:', error);
+        return [];
+      }
+    };
     
     return new Response(JSON.stringify({
       success: true,
@@ -252,14 +241,7 @@ serve(async (req) => {
         inStock: product.stats?.current?.[12]?.[1] === 1,
         salesRank: product.salesRanks?.[0]?.[1] || null,
         
-        priceHistory: product.csv ? [{
-          timestamp: new Date(product.csv[0] * 60000 + new Date('2011-01-01').getTime()).toISOString(),
-          buyBoxPrice: product.csv[18] !== -1 ? product.csv[18] / 100 : null,
-          amazonPrice: product.csv[1] !== -1 ? product.csv[1] / 100 : null,
-          newPrice: product.csv[0] !== -1 ? product.csv[0] / 100 : null,
-          salesRank: product.csv[3] !== -1 ? product.csv[3] : null,
-          offerCount: product.csv[2] !== -1 ? product.csv[2] : null,
-        }] : [],
+        priceHistory: processPriceHistory(product.csv),
         
         tokensUsed: data.tokensUsed || 0,
         tokensLeft: data.tokensLeft || 0,
