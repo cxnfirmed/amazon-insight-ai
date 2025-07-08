@@ -323,49 +323,47 @@ serve(async (req) => {
     console.log('Final stock status:', inStock);
     console.log('=== END STOCK STATUS DETERMINATION ===');
     
-    // FIXED AMAZON PRICE DETECTION - Using correct field for Amazon seller price
+    // AMAZON PRICE DETECTION - Search through offers for Amazon's seller ID
     console.log('=== AMAZON PRICE DETECTION DEBUG ===');
-    console.log('Product isAmazon field:', product.isAmazon);
-    console.log('Stats current[11] (Amazon field):', currentStats[11]);
-    console.log('Stats current[18] (Buy box price):', currentStats[18]);
-    console.log('All current stats for debugging:', currentStats);
+    console.log('Product offers object keys:', product.offers ? Object.keys(product.offers) : 'No offers object');
     
     let amazonPrice = null;
     
-    // Amazon's selling price should match the buy box price when Amazon is the seller
-    // Let's check if Amazon is selling at the buy box price
-    if (product.isAmazon === true && currentStats[18] !== undefined && currentStats[18] !== null && currentStats[18] !== -1) {
-      // When Amazon is the seller, their price is typically the buy box price
-      amazonPrice = currentStats[18] / 100;
-      console.log('✅ Amazon is seller and using buy box price:', amazonPrice);
-    } else if (currentStats[11] !== undefined && currentStats[11] !== null && currentStats[11] !== -1 && currentStats[11] > 0) {
-      // Fallback to stats.current[11] if available and reasonable
-      const priceFromField11 = currentStats[11] / 100;
-      
-      // Validate that this price makes sense (not too low compared to other prices)
-      const buyBoxPrice = currentStats[18] ? currentStats[18] / 100 : null;
-      const fbmPrice = currentStats[7] ? currentStats[7] / 100 : null;
-      
-      // If the price from field 11 is suspiciously low compared to other prices, don't use it
-      if (buyBoxPrice && priceFromField11 < (buyBoxPrice * 0.1)) {
-        console.log('⚠️ Price from field 11 seems too low compared to buy box price, skipping');
-        amazonPrice = null;
-      } else if (fbmPrice && priceFromField11 < (fbmPrice * 0.1)) {
-        console.log('⚠️ Price from field 11 seems too low compared to FBM price, skipping');
-        amazonPrice = null;
-      } else {
-        amazonPrice = priceFromField11;
-        console.log('✅ Using Amazon price from stats.current[11]:', amazonPrice);
+    if (product.offers) {
+      // Search through all offers to find Amazon's seller ID: ATVPDKIKX0DER
+      for (const [offerId, offer] of Object.entries(product.offers)) {
+        console.log(`Checking offer ${offerId}:`, {
+          sellerId: offer.sellerId,
+          hasOfferCSV: !!offer.offerCSV,
+          offerCSVLength: offer.offerCSV?.length
+        });
+        
+        if (offer.sellerId === 'ATVPDKIKX0DER') {
+          console.log('✅ Found Amazon offer (seller ID: ATVPDKIKX0DER)');
+          
+          // Extract price from offerCSV at index 1 (second value)
+          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 2) {
+            const rawPrice = offer.offerCSV[1];
+            console.log('Amazon offer raw price from offerCSV[1]:', rawPrice);
+            
+            if (typeof rawPrice === 'number' && rawPrice > 0) {
+              amazonPrice = rawPrice / 100; // Convert from cents to dollars
+              console.log('✅ Amazon Direct price found:', amazonPrice);
+              break; // Found Amazon's price, exit loop
+            } else {
+              console.log('❌ Amazon offer price is not valid:', rawPrice);
+            }
+          } else {
+            console.log('❌ Amazon offer does not have valid offerCSV data');
+          }
+        }
       }
-    }
-    
-    // Final validation - if we have a very low Amazon price but high buy box price, Amazon might not be the seller
-    if (amazonPrice && currentStats[18]) {
-      const buyBoxPrice = currentStats[18] / 100;
-      if (amazonPrice < (buyBoxPrice * 0.5)) {
-        console.log('⚠️ Amazon price significantly lower than buy box, Amazon may not be current seller');
-        amazonPrice = null;
+      
+      if (!amazonPrice) {
+        console.log('❌ Amazon (ATVPDKIKX0DER) not found in offers or has invalid price');
       }
+    } else {
+      console.log('❌ No offers object available');
     }
     
     console.log('Final Amazon price decision:', amazonPrice);
