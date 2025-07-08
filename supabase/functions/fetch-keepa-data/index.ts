@@ -199,11 +199,16 @@ serve(async (req) => {
           isFBA: liveOffer.isFBA,
           condition: liveOffer.condition,
           price: liveOffer.price,
-          isShippable: liveOffer.isShippable
+          isShippable: liveOffer.isShippable,
+          sellerId: liveOffer.sellerId
         });
         
-        // Check if this is a live FBA offer with new condition
-        if (liveOffer.isFBA === true && liveOffer.condition === 1 && liveOffer.price && liveOffer.price > 0) {
+        // Check if this is a live FBA offer with new condition and available for shipping
+        if (liveOffer.isFBA === true && 
+            liveOffer.condition === 1 && 
+            liveOffer.price && 
+            liveOffer.price > 0 && 
+            liveOffer.isShippable !== false) {
           const priceInDollars = liveOffer.price / 100;
           validFBAPrices.push(priceInDollars);
           console.log(`Found valid live FBA offer ${i}: $${priceInDollars}`);
@@ -216,49 +221,6 @@ serve(async (req) => {
         console.log('All valid FBA prices found:', validFBAPrices);
       } else {
         console.log('No valid live FBA offers found');
-      }
-    }
-    
-    // If no live offers found, check the offers array for FBA prices
-    if (lowestFBAPrice === null && product.offers && Array.isArray(product.offers)) {
-      console.log('No live FBA offers found, checking offers array with', product.offers.length, 'offers');
-      
-      const validFBAPrices = [];
-      
-      for (let i = 0; i < product.offers.length; i++) {
-        const offer = product.offers[i];
-        console.log(`Checking offer ${i}:`, {
-          isFBA: offer.isFBA,
-          condition: offer.condition,
-          hasOfferCSV: !!offer.offerCSV
-        });
-        
-        // Check if this is an FBA offer with new condition
-        if (offer.isFBA === true && offer.condition === 1 && offer.offerCSV && Array.isArray(offer.offerCSV)) {
-          console.log(`Offer ${i} CSV data length:`, offer.offerCSV.length);
-          
-          // Get the most recent price from the offerCSV array
-          // The last 3 values should be: [timestamp, price, shipping]
-          if (offer.offerCSV.length >= 3) {
-            const price = offer.offerCSV[offer.offerCSV.length - 2]; // Second to last value is price
-            
-            if (typeof price === 'number' && price > 100 && price < 1000000) { // Reasonable price range in cents
-              const priceInDollars = price / 100;
-              validFBAPrices.push(priceInDollars);
-              console.log(`Found valid FBA price from offer ${i}: $${priceInDollars} (raw: ${price})`);
-            } else {
-              console.log(`Invalid price found in offer ${i}:`, price);
-            }
-          }
-        }
-      }
-      
-      if (validFBAPrices.length > 0) {
-        lowestFBAPrice = Math.min(...validFBAPrices);
-        console.log('Calculated lowest FBA price from offers:', lowestFBAPrice);
-        console.log('All valid FBA prices found:', validFBAPrices);
-      } else {
-        console.log('No valid FBA offers found in offers array');
       }
     }
     
