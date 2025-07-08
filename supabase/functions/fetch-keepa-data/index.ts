@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -585,31 +586,53 @@ serve(async (req) => {
     if (isUpc) {
       console.log(`Converting UPC to ASIN using Keepa productFinder: ${asin}`);
       
-      const productFinderUrl = `https://api.keepa.com/product-finder?accesskey=${keepaApiKey}&domain=${domain}&code=${asin}`;
+      const productFinderUrl = `https://api.keepa.com/product-finder?key=${keepaApiKey}&domain=${domain}&code=${asin}`;
       
-      const finderResponse = await fetch(productFinderUrl);
-      if (!finderResponse.ok) {
-        throw new Error(`Keepa productFinder API error: ${finderResponse.status} ${finderResponse.statusText}`);
-      }
+      try {
+        const finderResponse = await fetch(productFinderUrl);
+        console.log('Keepa productFinder response status:', finderResponse.status);
+        
+        if (!finderResponse.ok) {
+          console.log('Keepa productFinder failed with status:', finderResponse.status);
+          const errorText = await finderResponse.text();
+          console.log('Keepa productFinder error response:', errorText);
+          
+          // Instead of throwing immediately, return a more helpful error
+          if (finderResponse.status === 404) {
+            throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
+          } else if (finderResponse.status === 429) {
+            throw new Error(`Keepa API rate limit exceeded. Please try again in a moment.`);
+          } else if (finderResponse.status === 401 || finderResponse.status === 403) {
+            throw new Error(`Keepa API authentication failed. Please check API key configuration.`);
+          } else {
+            throw new Error(`Keepa productFinder API error: ${finderResponse.status} - ${errorText || 'Unknown error'}`);
+          }
+        }
 
-      const finderData = await finderResponse.json();
-      console.log('Keepa productFinder response:', { 
-        tokensLeft: finderData.tokensLeft, 
-        productCount: finderData.products?.length 
-      });
-      
-      if (!finderData.products || finderData.products.length === 0) {
-        throw new Error(`No product found for UPC: ${asin}`);
-      }
+        const finderData = await finderResponse.json();
+        console.log('Keepa productFinder response:', { 
+          tokensLeft: finderData.tokensLeft, 
+          productCount: finderData.products?.length,
+          hasProducts: !!finderData.products?.length
+        });
+        
+        if (!finderData.products || finderData.products.length === 0) {
+          throw new Error(`No Amazon product found for UPC: ${asin}. This UPC may not be sold on Amazon or may be discontinued.`);
+        }
 
-      finalAsin = finderData.products[0].asin;
-      upcConversionInfo = {
-        originalUpc: asin,
-        convertedAsin: finalAsin,
-        tokensUsed: finderData.tokensConsumed || 1
-      };
-      
-      console.log(`UPC ${asin} converted to ASIN: ${finalAsin}`);
+        finalAsin = finderData.products[0].asin;
+        upcConversionInfo = {
+          originalUpc: asin,
+          convertedAsin: finalAsin,
+          tokensUsed: finderData.tokensConsumed || 1
+        };
+        
+        console.log(`UPC ${asin} successfully converted to ASIN: ${finalAsin}`);
+        
+      } catch (error) {
+        console.error('UPC conversion failed:', error);
+        throw error; // Re-throw the detailed error
+      }
     }
 
     console.log(`Fetching Keepa data for ASIN: ${finalAsin}`);
@@ -621,7 +644,16 @@ serve(async (req) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Keepa API error response:', errorText);
-      throw new Error(`Keepa API error: ${response.status} ${response.statusText}`);
+      
+      if (response.status === 404) {
+        throw new Error(`Product with ASIN ${finalAsin} not found in Keepa database.`);
+      } else if (response.status === 429) {
+        throw new Error(`Keepa API rate limit exceeded. Please try again in a moment.`);
+      } else if (response.status === 401 || response.status === 403) {
+        throw new Error(`Keepa API authentication failed. Please check API key configuration.`);
+      } else {
+        throw new Error(`Keepa API error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
     }
 
     const data = await response.json();
@@ -632,7 +664,7 @@ serve(async (req) => {
     });
     
     if (!data.products || data.products.length === 0) {
-      throw new Error('Product not found in Keepa database');
+      throw new Error(`Product with ASIN ${finalAsin} not found in Keepa database.`);
     }
 
     const product: KeepaProduct = data.products[0];

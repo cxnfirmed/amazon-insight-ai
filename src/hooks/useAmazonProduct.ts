@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -129,7 +130,25 @@ export const useAmazonProduct = () => {
 
       if (!keepaResponse?.success) {
         console.error('Keepa API returned unsuccessful response:', keepaResponse);
-        throw new Error(keepaResponse?.error || 'Failed to fetch product data from Keepa');
+        
+        // Provide more specific error messages based on the error content
+        let errorMessage = keepaResponse?.error || 'Failed to fetch product data from Keepa';
+        
+        if (errorMessage.includes('not found in Keepa database')) {
+          if (isUpcSearch) {
+            errorMessage = `UPC ${trimmedInput} was not found. This UPC may not exist on Amazon or may be discontinued.`;
+          } else {
+            errorMessage = `ASIN ${trimmedInput} was not found in the Keepa database.`;
+          }
+        } else if (errorMessage.includes('rate limit exceeded')) {
+          errorMessage = 'API rate limit exceeded. Please wait a moment and try again.';
+        } else if (errorMessage.includes('authentication failed')) {
+          errorMessage = 'API authentication failed. Please contact support.';
+        } else if (errorMessage.includes('No Amazon product found for UPC')) {
+          errorMessage = `UPC ${trimmedInput} exists but is not available on Amazon or has been discontinued.`;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const keepaData = keepaResponse.data;
@@ -215,8 +234,8 @@ export const useAmazonProduct = () => {
       setProduct(errorProduct);
       
       toast({
-        title: "Error",
-        description: `Failed to fetch product data: ${error.message}`,
+        title: "Search Failed",
+        description: error.message,
         variant: "destructive",
       });
     } finally {
