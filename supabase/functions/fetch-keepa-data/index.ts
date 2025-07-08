@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -45,11 +44,25 @@ serve(async (req) => {
     if (isUpc) {
       console.log(`UPC search detected: ${asin}`);
       
-      // Use productFinder to find all products with this UPC
-      const finderUrl = `https://api.keepa.com/productFinder/?key=${keepaApiKey}&domain=1&type=product&selection={"upc":"${asin}"}`;
-      console.log('Calling productFinder with URL:', finderUrl);
+      // Use the correct productFinder API endpoint - it's a POST request with JSON body
+      const finderUrl = `https://api.keepa.com/productFinder/?key=${keepaApiKey}&domain=1`;
+      const finderRequestBody = {
+        type: "product",
+        selection: {
+          upc: asin
+        }
+      };
       
-      const finderResponse = await fetch(finderUrl);
+      console.log('Calling productFinder with URL:', finderUrl);
+      console.log('Request body:', JSON.stringify(finderRequestBody, null, 2));
+      
+      const finderResponse = await fetch(finderUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(finderRequestBody)
+      });
       
       // Check if response is ok before parsing
       if (!finderResponse.ok) {
