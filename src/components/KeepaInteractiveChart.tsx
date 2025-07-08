@@ -80,13 +80,35 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
 
   // Parse Keepa CSV data into chart-friendly format
   const chartData: ChartDataPoint[] = useMemo(() => {
-    if (!product.debug_data?.data?.csv || !Array.isArray(product.debug_data.data.csv)) {
-      console.log('No CSV data available');
+    console.log('Processing chart data for product:', product.asin);
+    console.log('Product CSV data:', product.csv);
+    console.log('Product debug data:', product.debug_data);
+    
+    // Try to get CSV data from multiple possible locations
+    let csvData = null;
+    
+    // First try the direct csv field
+    if (product.csv && Array.isArray(product.csv) && product.csv.length > 0) {
+      csvData = product.csv;
+      console.log('Found CSV data in product.csv, length:', csvData.length);
+    }
+    // Fallback to debug_data
+    else if (product.debug_data?.data?.csv && Array.isArray(product.debug_data.data.csv)) {
+      csvData = product.debug_data.data.csv;
+      console.log('Found CSV data in debug_data.data.csv, length:', csvData.length);
+    }
+    // Another fallback
+    else if (product.debug_data?.csv && Array.isArray(product.debug_data.csv)) {
+      csvData = product.debug_data.csv;
+      console.log('Found CSV data in debug_data.csv, length:', csvData.length);
+    }
+    
+    if (!csvData || csvData.length === 0) {
+      console.log('No CSV data found or empty array');
       return [];
     }
 
-    const csvData = product.debug_data.data.csv;
-    const stats = product.debug_data.data.stats;
+    const stats = product.debug_data?.data?.stats || {};
     
     console.log('Parsing CSV data, length:', csvData.length);
     console.log('First few CSV items:', csvData.slice(0, 10));
@@ -100,6 +122,12 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       const values = csvData[i + 1];
       
       if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
+        console.log('Invalid timestamp at index', i, ':', timestampMinutes);
+        continue;
+      }
+      
+      if (!Array.isArray(values)) {
+        console.log('Invalid values array at index', i + 1, ':', values);
         continue;
       }
       
@@ -107,6 +135,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       const date = new Date(timestampMs);
       
       if (isNaN(date.getTime())) {
+        console.log('Invalid date for timestamp:', timestampMinutes);
         continue;
       }
       
@@ -115,23 +144,24 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         timestamp: date.toISOString(),
         timestampMs,
         formattedDate: date.toLocaleDateString(),
-        amazonPrice: values?.[0] && values[0] !== -1 ? values[0] / 100 : undefined,
-        fbaPrice: values?.[1] && values[1] !== -1 ? values[1] / 100 : undefined,
-        fbmPrice: values?.[3] && values[3] !== -1 ? values[3] / 100 : undefined,
-        buyBoxPrice: values?.[4] && values[4] !== -1 ? values[4] / 100 : undefined,
-        salesRank: values?.[5] && values[5] !== -1 ? values[5] : undefined,
-        offerCount: values?.[20] && values[20] !== -1 ? values[20] : undefined,
-        rating: values?.[42] && values[42] !== -1 ? values[42] / 10 : undefined,
-        reviewCount: values?.[44] && values[44] !== -1 ? values[44] : undefined,
-        soldPastMonth: stats?.sold30 || stats?.buyBoxShipped30 || undefined
+        amazonPrice: values[0] && values[0] !== -1 ? values[0] / 100 : undefined,
+        fbaPrice: values[1] && values[1] !== -1 ? values[1] / 100 : undefined,
+        fbmPrice: values[3] && values[3] !== -1 ? values[3] / 100 : undefined,
+        buyBoxPrice: values[4] && values[4] !== -1 ? values[4] / 100 : undefined,
+        salesRank: values[5] && values[5] !== -1 ? values[5] : undefined,
+        offerCount: values[20] && values[20] !== -1 ? values[20] : undefined,
+        rating: values[42] && values[42] !== -1 ? values[42] / 10 : undefined,
+        reviewCount: values[44] && values[44] !== -1 ? values[44] : undefined,
+        soldPastMonth: stats.sold30 || stats.buyBoxShipped30 || undefined
       };
       
       dataPoints.push(dataPoint);
     }
     
     console.log('Processed data points:', dataPoints.length);
+    console.log('Sample data points:', dataPoints.slice(0, 5));
     return dataPoints.sort((a, b) => a.timestampMs - b.timestampMs);
-  }, [product.debug_data]);
+  }, [product.csv, product.debug_data]);
 
   // Filter data based on time range
   const filteredData = useMemo(() => {
@@ -184,9 +214,15 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center h-64">
-            <p className="text-slate-600 dark:text-slate-400">
-              No historical price data available from Keepa API
-            </p>
+            <div className="text-center">
+              <p className="text-slate-600 dark:text-slate-400 mb-2">
+                No historical price data available from Keepa API
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                CSV data length: {product.csv?.length || 0} | 
+                Debug CSV: {product.debug_data?.data?.csv?.length || 0}
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
