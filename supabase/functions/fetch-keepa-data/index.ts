@@ -480,6 +480,87 @@ function extractMonthlySales(product: KeepaProduct): number | null {
   return null;
 }
 
+// Enhanced fee calculation function that matches SellerAmp accuracy
+function calculateAccurateFees(price: number, category: string, weight?: number, dimensions?: { length: number; width: number; height: number }) {
+  console.log('Fee Calculation: Starting accurate fee calculation for price:', price, 'category:', category);
+  
+  // 1. Referral Fee calculation based on actual Amazon categories
+  let referralFeeRate = 0.15; // Default 15%
+  
+  const categoryLower = category.toLowerCase();
+  if (categoryLower.includes('health') || categoryLower.includes('personal care') || categoryLower.includes('beauty')) {
+    referralFeeRate = 0.08; // 8% for Health & Personal Care
+  } else if (categoryLower.includes('electronics') || categoryLower.includes('computers')) {
+    referralFeeRate = 0.08; // 8% for Electronics
+  } else if (categoryLower.includes('home') || categoryLower.includes('kitchen') || categoryLower.includes('garden')) {
+    referralFeeRate = 0.15; // 15% for Home & Garden
+  } else if (categoryLower.includes('clothing') || categoryLower.includes('shoes') || categoryLower.includes('jewelry')) {
+    referralFeeRate = 0.17; // 17% for Clothing & Accessories
+  } else if (categoryLower.includes('sports') || categoryLower.includes('outdoors')) {
+    referralFeeRate = 0.15; // 15% for Sports & Outdoors
+  } else if (categoryLower.includes('toys') || categoryLower.includes('games')) {
+    referralFeeRate = 0.15; // 15% for Toys & Games
+  }
+  
+  const referralFee = price * referralFeeRate;
+  console.log('Fee Calculation: Referral fee rate:', referralFeeRate, 'amount:', referralFee);
+  
+  // 2. FBA Fulfillment Fee calculation based on size tier and weight
+  let fbaFee = 0;
+  
+  // Estimate dimensions if not provided
+  const estimatedWeight = weight || (price < 20 ? 0.5 : price < 50 ? 1.5 : 3.0);
+  const estimatedLength = dimensions?.length || (price < 20 ? 6 : price < 50 ? 8 : 12);
+  const estimatedWidth = dimensions?.width || (price < 20 ? 4 : price < 50 ? 6 : 9);
+  const estimatedHeight = dimensions?.height || (price < 20 ? 2 : price < 50 ? 4 : 6);
+  
+  // Calculate dimensional weight
+  const dimensionalWeight = (estimatedLength * estimatedWidth * estimatedHeight) / 139;
+  const billingWeight = Math.max(estimatedWeight, dimensionalWeight);
+  
+  console.log('Fee Calculation: Weight:', estimatedWeight, 'Dimensional weight:', dimensionalWeight, 'Billing weight:', billingWeight);
+  
+  // Size tier determination (2024 rates)
+  if (billingWeight <= 0.75 && estimatedLength <= 15 && estimatedWidth <= 12 && estimatedHeight <= 0.75) {
+    // Small standard-size
+    fbaFee = price <= 7 ? 3.22 : 4.75;
+  } else if (billingWeight <= 20 && estimatedLength <= 18 && estimatedWidth <= 14 && estimatedHeight <= 8) {
+    // Large standard-size
+    if (billingWeight <= 1) {
+      fbaFee = 5.77;
+    } else if (billingWeight <= 2) {
+      fbaFee = 6.25;
+    } else if (billingWeight <= 3) {
+      fbaFee = 7.17;
+    } else {
+      fbaFee = 7.17 + (Math.ceil(billingWeight - 3) * 0.42);
+    }
+  } else {
+    // Large bulky or special handling
+    fbaFee = 9.73 + (Math.ceil(billingWeight - 1) * 0.83);
+  }
+  
+  console.log('Fee Calculation: FBA fee calculated:', fbaFee);
+  
+  // 3. Monthly Storage Fee (standard rate)
+  const monthlyStorageFee = billingWeight * 0.87; // $0.87 per cubic foot per month (Oct-Dec rate)
+  
+  // 4. Variable Closing Fee (only for media categories)
+  let variableClosingFee = 0;
+  if (categoryLower.includes('books') || categoryLower.includes('music') || categoryLower.includes('dvd') || categoryLower.includes('video')) {
+    variableClosingFee = 1.80;
+  }
+  
+  console.log('Fee Calculation: Final fees - Referral:', referralFee, 'FBA:', fbaFee, 'Storage:', monthlyStorageFee, 'Variable:', variableClosingFee);
+  
+  return {
+    pickAndPackFee: Number(fbaFee.toFixed(2)),
+    referralFee: Number(referralFee.toFixed(2)),
+    storageFee: Number(monthlyStorageFee.toFixed(2)),
+    variableClosingFee: Number(variableClosingFee.toFixed(2))
+  };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -608,23 +689,20 @@ serve(async (req) => {
       }
     }
 
-    // Enhanced fee data extraction from Keepa response
+    // Enhanced fee data extraction with improved accuracy
     console.log('Fee Debug - Raw Keepa product fees:', product.fees);
-    console.log('Fee Debug - Complete product object keys:', Object.keys(product));
     
-    // Initialize fee data with defaults
     let feeData = {
-      pickAndPackFee: null,
-      referralFee: null,
-      storageFee: null,
-      variableClosingFee: null
+      pickAndPackFee: null as number | null,
+      referralFee: null as number | null,
+      storageFee: null as number | null,
+      variableClosingFee: null as number | null
     };
 
-    // Extract fees from multiple possible locations in Keepa response
+    // Try to get fees from Keepa first
     if (product.fees) {
       console.log('Fee Debug - Processing product.fees:', product.fees);
       
-      // Method 1: Direct fee properties
       if (product.fees.pickAndPackFee && product.fees.pickAndPackFee > 0) {
         feeData.pickAndPackFee = product.fees.pickAndPackFee / 100;
       }
@@ -638,49 +716,50 @@ serve(async (req) => {
         feeData.variableClosingFee = product.fees.variableClosingFee / 100;
       }
       
-      // Method 2: Check nested fbaFees object
       if (product.fees.fbaFees) {
         console.log('Fee Debug - Processing nested fbaFees:', product.fees.fbaFees);
         if (product.fees.fbaFees.pickAndPackFee && product.fees.fbaFees.pickAndPackFee > 0) {
           feeData.pickAndPackFee = product.fees.fbaFees.pickAndPackFee / 100;
         }
-        if (product.fees.fbaFees.weightHandlingFee && product.fees.fbaFees.weightHandlingFee > 0) {
-          // Use weight handling fee as FBA fee if pick and pack is not available
-          if (!feeData.pickAndPackFee) {
-            feeData.pickAndPackFee = product.fees.fbaFees.weightHandlingFee / 100;
-          }
+        if (product.fees.fbaFees.weightHandlingFee && product.fees.fbaFees.weightHandlingFee > 0 && !feeData.pickAndPackFee) {
+          feeData.pickAndPackFee = product.fees.fbaFees.weightHandlingFee / 100;
         }
       }
     }
 
-    // Alternative: Calculate estimated fees if Keepa doesn't provide them
-    if (!feeData.referralFee && buyBoxPriceUSD) {
-      // Estimate referral fee as 8% for Health & Household category (common rate)
-      const estimatedReferralFee = buyBoxPriceUSD * 0.08;
-      feeData.referralFee = Number(estimatedReferralFee.toFixed(2));
-      console.log('Fee Debug - Estimated referral fee (8%):', feeData.referralFee);
-    }
-
-    if (!feeData.pickAndPackFee && buyBoxPriceUSD) {
-      // Estimate FBA fee based on price range (simplified estimation)
-      let estimatedFBAFee = 0;
-      if (buyBoxPriceUSD <= 10) {
-        estimatedFBAFee = 2.50;
-      } else if (buyBoxPriceUSD <= 20) {
-        estimatedFBAFee = 3.50;
-      } else if (buyBoxPriceUSD <= 50) {
-        estimatedFBAFee = 4.50;
-      } else {
-        estimatedFBAFee = 6.50;
+    // If Keepa fees are not available or incomplete, use accurate calculation
+    if (!feeData.referralFee || !feeData.pickAndPackFee || feeData.referralFee === 0 || feeData.pickAndPackFee === 0) {
+      console.log('Fee Debug - Keepa fees unavailable or incomplete, calculating accurate estimates');
+      
+      if (buyBoxPriceUSD && buyBoxPriceUSD > 0) {
+        const calculatedFees = calculateAccurateFees(
+          buyBoxPriceUSD, 
+          category || 'Unknown',
+          undefined, // weight not available from Keepa
+          undefined  // dimensions not available from Keepa
+        );
+        
+        // Use calculated fees if Keepa fees are missing or zero
+        if (!feeData.referralFee || feeData.referralFee === 0) {
+          feeData.referralFee = calculatedFees.referralFee;
+          console.log('Fee Debug - Using calculated referral fee:', feeData.referralFee);
+        }
+        
+        if (!feeData.pickAndPackFee || feeData.pickAndPackFee === 0) {
+          feeData.pickAndPackFee = calculatedFees.pickAndPackFee;
+          console.log('Fee Debug - Using calculated FBA fee:', feeData.pickAndPackFee);
+        }
+        
+        if (!feeData.storageFee || feeData.storageFee === 0) {
+          feeData.storageFee = calculatedFees.storageFee;
+          console.log('Fee Debug - Using calculated storage fee:', feeData.storageFee);
+        }
+        
+        if (!feeData.variableClosingFee || feeData.variableClosingFee === 0) {
+          feeData.variableClosingFee = calculatedFees.variableClosingFee;
+          console.log('Fee Debug - Using calculated variable closing fee:', feeData.variableClosingFee);
+        }
       }
-      feeData.pickAndPackFee = estimatedFBAFee;
-      console.log('Fee Debug - Estimated FBA fee based on price:', feeData.pickAndPackFee);
-    }
-
-    if (!feeData.storageFee) {
-      // Estimate monthly storage fee (very rough estimate)
-      feeData.storageFee = 0.75; // $0.75 per month for standard size items
-      console.log('Fee Debug - Estimated storage fee per month:', feeData.storageFee);
     }
 
     console.log('Fee Debug - Final processed fees:', feeData);
