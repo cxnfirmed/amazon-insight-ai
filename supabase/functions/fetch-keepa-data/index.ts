@@ -323,31 +323,48 @@ serve(async (req) => {
     console.log('Final stock status:', inStock);
     console.log('=== END STOCK STATUS DETERMINATION ===');
     
-    // FIXED AMAZON PRICE DETECTION - Using isAmazon and stats.current[11]
+    // FIXED AMAZON PRICE DETECTION - Using correct field for Amazon seller price
     console.log('=== AMAZON PRICE DETECTION DEBUG ===');
     console.log('Product isAmazon field:', product.isAmazon);
-    console.log('Stats current[11] (Amazon price):', currentStats[11]);
+    console.log('Stats current[11] (Amazon field):', currentStats[11]);
+    console.log('Stats current[18] (Buy box price):', currentStats[18]);
+    console.log('All current stats for debugging:', currentStats);
     
     let amazonPrice = null;
     
-    // Check for Amazon price in stats.current[11] (Amazon's current price in cents)
-    if (currentStats[11] !== undefined && currentStats[11] !== null && currentStats[11] !== -1 && currentStats[11] > 0) {
-      amazonPrice = currentStats[11] / 100;
-      console.log('✅ Found Amazon price from stats.current[11]:', amazonPrice);
+    // Amazon's selling price should match the buy box price when Amazon is the seller
+    // Let's check if Amazon is selling at the buy box price
+    if (product.isAmazon === true && currentStats[18] !== undefined && currentStats[18] !== null && currentStats[18] !== -1) {
+      // When Amazon is the seller, their price is typically the buy box price
+      amazonPrice = currentStats[18] / 100;
+      console.log('✅ Amazon is seller and using buy box price:', amazonPrice);
+    } else if (currentStats[11] !== undefined && currentStats[11] !== null && currentStats[11] !== -1 && currentStats[11] > 0) {
+      // Fallback to stats.current[11] if available and reasonable
+      const priceFromField11 = currentStats[11] / 100;
       
-      // Additional validation: check if isAmazon is explicitly true
-      if (product.isAmazon === true) {
-        console.log('✅ Confirmed: Amazon is a seller (isAmazon === true)');
+      // Validate that this price makes sense (not too low compared to other prices)
+      const buyBoxPrice = currentStats[18] ? currentStats[18] / 100 : null;
+      const fbmPrice = currentStats[7] ? currentStats[7] / 100 : null;
+      
+      // If the price from field 11 is suspiciously low compared to other prices, don't use it
+      if (buyBoxPrice && priceFromField11 < (buyBoxPrice * 0.1)) {
+        console.log('⚠️ Price from field 11 seems too low compared to buy box price, skipping');
+        amazonPrice = null;
+      } else if (fbmPrice && priceFromField11 < (fbmPrice * 0.1)) {
+        console.log('⚠️ Price from field 11 seems too low compared to FBM price, skipping');
+        amazonPrice = null;
       } else {
-        console.log('ℹ️ Amazon price found but isAmazon field is:', product.isAmazon);
+        amazonPrice = priceFromField11;
+        console.log('✅ Using Amazon price from stats.current[11]:', amazonPrice);
       }
-    } else {
-      console.log('❌ No valid Amazon price found in stats.current[11]:', currentStats[11]);
-      
-      if (product.isAmazon === true) {
-        console.log('⚠️ isAmazon is true but no valid price in stats.current[11]');
-      } else {
-        console.log('❌ Amazon is not a seller (isAmazon:', product.isAmazon, ')');
+    }
+    
+    // Final validation - if we have a very low Amazon price but high buy box price, Amazon might not be the seller
+    if (amazonPrice && currentStats[18]) {
+      const buyBoxPrice = currentStats[18] / 100;
+      if (amazonPrice < (buyBoxPrice * 0.5)) {
+        console.log('⚠️ Amazon price significantly lower than buy box, Amazon may not be current seller');
+        amazonPrice = null;
       }
     }
     
