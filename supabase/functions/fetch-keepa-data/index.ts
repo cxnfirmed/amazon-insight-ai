@@ -323,51 +323,26 @@ serve(async (req) => {
     console.log('Final stock status:', inStock);
     console.log('=== END STOCK STATUS DETERMINATION ===');
     
-    // AMAZON PRICE DETECTION - Fixed logic to properly identify Amazon as seller
+    // FIXED AMAZON PRICE DETECTION - Using isAmazon and stats.current[11]
     console.log('=== AMAZON PRICE DETECTION DEBUG ===');
-    console.log('Buy box seller ID:', product.buyBoxSellerId);
-    console.log('Buy box is Amazon:', product.buyBoxIsAmazon);
-    console.log('Live offers order:', product.liveOffersOrder?.slice(0, 3)); // Show first 3 offers
+    console.log('Product isAmazon field:', product.isAmazon);
+    console.log('Stats current[11] (Amazon price):', currentStats[11]);
     
     let amazonPrice = null;
     
-    // Method 1: Check if Amazon is the buy box winner
-    if (product.buyBoxSellerId === 'ATVPDKIKX0DER' || product.buyBoxIsAmazon === true) {
-      amazonPrice = currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null;
-      console.log('Amazon is buy box winner, price:', amazonPrice);
-    }
-    
-    // Method 2: Check live offers for Amazon seller ID
-    if (!amazonPrice && product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.offers) {
-      for (const offerId of product.liveOffersOrder) {
-        const offer = product.offers[offerId];
-        if (offer && offer.sellerId === 'ATVPDKIKX0DER') {
-          // Extract price from offerCSV (3rd-to-last value)
-          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
-            const priceIndex = offer.offerCSV.length - 3;
-            const rawPrice = offer.offerCSV[priceIndex];
-            if (typeof rawPrice === 'number' && rawPrice >= 1 && rawPrice <= 1000000) {
-              amazonPrice = rawPrice / 100;
-              console.log('Found Amazon offer in live offers, price:', amazonPrice);
-              break;
-            }
-          }
-        }
-      }
-    }
-    
-    // Method 3: Only check stats.current[16] if it's reasonable and not a data error
-    if (!amazonPrice && currentStats[16] !== undefined && currentStats[16] !== null && currentStats[16] !== -1) {
-      const potentialAmazonPrice = currentStats[16] / 100;
-      const buyBoxPrice = currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null;
+    // Use the correct Keepa API fields for Amazon price detection
+    if (product.isAmazon === true) {
+      console.log('✅ Amazon is a seller (isAmazon === true)');
       
-      // Only use this price if it's reasonable (not drastically different from buy box)
-      if (buyBoxPrice && Math.abs(potentialAmazonPrice - buyBoxPrice) < (buyBoxPrice * 0.5)) {
-        amazonPrice = potentialAmazonPrice;
-        console.log('Found reasonable Amazon price from stats.current[16]:', amazonPrice);
+      // Get Amazon price from stats.current[11] (in cents)
+      if (currentStats[11] !== undefined && currentStats[11] !== null && currentStats[11] !== -1 && currentStats[11] > 0) {
+        amazonPrice = currentStats[11] / 100;
+        console.log('✅ Found Amazon price from stats.current[11]:', amazonPrice);
       } else {
-        console.log('Rejected unreasonable Amazon price from stats.current[16]:', potentialAmazonPrice, 'vs buy box:', buyBoxPrice);
+        console.log('❌ Amazon price not available or invalid in stats.current[11]:', currentStats[11]);
       }
+    } else {
+      console.log('❌ Amazon is not a seller (isAmazon !== true)');
     }
     
     console.log('Final Amazon price decision:', amazonPrice);
