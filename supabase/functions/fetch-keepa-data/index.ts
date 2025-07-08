@@ -1,9 +1,17 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Input detection functions
+function isUPC(input: string): boolean {
+  return /^\d{12}$/.test(input.trim());
+}
+
+function isASIN(input: string): boolean {
+  return /^[A-Z0-9]{10}$/.test(input.trim().toUpperCase());
 }
 
 serve(async (req) => {
@@ -28,7 +36,7 @@ serve(async (req) => {
       throw new Error(`Invalid JSON in request body: ${parseError.message}`);
     }
 
-    const { asin, isUpc } = requestBody;
+    const { asin } = requestBody;
     
     if (!asin) {
       throw new Error('ASIN or UPC is required');
@@ -39,144 +47,71 @@ serve(async (req) => {
       throw new Error('KEEPA_API_KEY not configured');
     }
 
-    console.log(`Processing request for: ${asin}, isUpc: ${isUpc}`);
-    console.log(`Using API key: ${keepaApiKey.substring(0, 10)}...`);
+    const trimmedInput = asin.trim();
+    console.log(`Processing input: ${trimmedInput}`);
 
-    // If it's a UPC search, use product endpoint with code parameter
-    if (isUpc) {
-      console.log(`UPC search detected: ${asin}`);
-      
-      // Use the product endpoint with code parameter for UPC lookup
-      const upcUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${asin}&history=1&stats=1&offers=20`;
-      
-      console.log('Calling Keepa API for UPC with URL:', upcUrl);
-      
-      const upcResponse = await fetch(upcUrl);
-      
-      if (!upcResponse.ok) {
-        console.error('UPC API error:', upcResponse.status, upcResponse.statusText);
-        throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
-      }
-      
-      const upcResponseText = await upcResponse.text();
-      console.log('UPC API raw response:', upcResponseText);
-      
-      let upcData;
-      try {
-        upcData = JSON.parse(upcResponseText);
-      } catch (jsonError) {
-        console.error('Failed to parse UPC response as JSON:', jsonError);
-        throw new Error(`UPC ${asin} search failed - invalid response format`);
-      }
-      
-      console.log('UPC API parsed response:', JSON.stringify(upcData, null, 2));
-      
-      if (!upcData.products || upcData.products.length === 0) {
-        throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
-      }
+    // Detect input type using the detection functions
+    const inputIsUPC = isUPC(trimmedInput);
+    const inputIsASIN = isASIN(trimmedInput);
 
-      // If only one product found, return it directly
-      if (upcData.products.length === 1) {
-        const product = upcData.products[0];
-        
-        // Extract current prices from the stats object
-        const currentStats = product.stats?.current || {};
-        console.log('Product current stats:', currentStats);
-        
-        // Extract sales rank properly from salesRanks array
-        let salesRank = null;
-        if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
-          // Look for the first sales rank entry that has a current value
-          for (const rankEntry of product.salesRanks) {
-            if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
-              salesRank = rankEntry.current;
-              break;
-            }
-          }
-        }
-        
-        // Extract offer count - try multiple sources
-        let offerCount = 0;
-        // First try stats.current[2] (New offers count)
-        if (currentStats[2] !== undefined && currentStats[2] !== null && currentStats[2] !== -1) {
-          offerCount = currentStats[2];
-        }
-        // Fallback to offerCountNew
-        else if (product.offerCountNew !== undefined && product.offerCountNew !== null && product.offerCountNew !== -1) {
-          offerCount = product.offerCountNew;
-        }
-        // Try looking at live offers data if available
-        else if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
-          offerCount = product.liveOffersOrder.length;
-        }
-        
-        // Stock status - check multiple indicators
-        let inStock = true; // Default to true unless we have clear indication it's out of stock
-        // Check if the buy box price exists and is valid
-        if (currentStats[18] === undefined || currentStats[18] === null || currentStats[18] === -1) {
-          // No buy box price might indicate out of stock, but check other indicators
-          if (offerCount === 0 && (currentStats[0] === undefined || currentStats[0] === -1)) {
-            inStock = false;
-          }
-        }
-        // Override with explicit stock indicator if available
-        if (currentStats[12] !== undefined) {
-          inStock = currentStats[12] === 1;
-        }
-        
-        console.log('Extracted data:', {
-          salesRank,
-          offerCount,
-          inStock,
-          salesRanksArray: product.salesRanks,
-          offerCountNew: product.offerCountNew,
-          liveOffersOrder: product.liveOffersOrder?.length || 0
-        });
-        
-        return new Response(JSON.stringify({
-          success: true,
-          data: {
-            asin: product.asin,
-            title: product.title || 'Product title not available',
-            manufacturer: product.manufacturer || null,
-            category: product.categoryTree?.[product.categoryTree.length - 1]?.name || 'Unknown',
-            imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
-            
-            buyBoxPrice: currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null,
-            lowestFBAPrice: currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null,
-            lowestFBMPrice: currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null,
-            amazonPrice: currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null,
-            
-            fees: {
-              pickAndPackFee: product.fbaFees?.pickAndPackFee ? product.fbaFees.pickAndPackFee / 100 : null,
-              referralFee: product.referralFeePercent ? (currentStats[18] || 0) * (product.referralFeePercent / 10000) : null,
-              storageFee: product.fbaFees?.storageFee ? product.fbaFees.storageFee / 100 : null,
-              variableClosingFee: product.variableClosingFee ? product.variableClosingFee / 100 : null,
-            },
-            
-            offerCount: offerCount,
-            estimatedMonthlySales: product.monthlySold || null,
-            inStock: inStock,
-            salesRank: salesRank,
-            
-            priceHistory: [],
-            
-            tokensUsed: upcData.tokensUsed || 0,
-            tokensLeft: upcData.tokensLeft || 0,
-            processingTime: upcData.processingTime || 0,
-            lastUpdate: new Date().toISOString(),
-            upcConversion: {
-              originalUpc: asin,
-              convertedAsin: product.asin
-            }
-          }
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+    console.log(`Input detection - UPC: ${inputIsUPC}, ASIN: ${inputIsASIN}`);
 
-      // Multiple products found - return selection list
-      const productChoices = upcData.products.slice(0, 10).map(product => {
+    if (!inputIsUPC && !inputIsASIN) {
+      throw new Error('Invalid input format. Please enter a valid ASIN (10 characters) or UPC (12 digits).');
+    }
+
+    let apiUrl: string;
+    let searchType: string;
+
+    if (inputIsUPC) {
+      // UPC search using code parameter
+      searchType = 'UPC';
+      apiUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&code=${trimmedInput}&history=1&stats=1&offers=20`;
+      console.log('UPC search detected, using code parameter');
+    } else {
+      // ASIN search using asin parameter
+      searchType = 'ASIN';
+      apiUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${trimmedInput.toUpperCase()}&history=1&stats=1&offers=20`;
+      console.log('ASIN search detected, using asin parameter');
+    }
+
+    console.log(`Calling Keepa API (${searchType}) with URL:`, apiUrl);
+    
+    const response = await fetch(apiUrl);
+    
+    if (!response.ok) {
+      console.error(`${searchType} API error:`, response.status, response.statusText);
+      throw new Error(`Keepa API error: ${response.status} ${response.statusText}`);
+    }
+    
+    const responseText = await response.text();
+    console.log(`${searchType} API raw response length:`, responseText.length);
+    
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (jsonError) {
+      console.error(`Failed to parse ${searchType} response as JSON:`, jsonError);
+      throw new Error(`Invalid JSON response from Keepa ${searchType} API: ${jsonError.message}`);
+    }
+    
+    console.log('Parsed API response structure:', {
+      hasProducts: !!data.products,
+      productsLength: data.products?.length,
+      tokensUsed: data.tokensUsed,
+      tokensLeft: data.tokensLeft
+    });
+    
+    if (!data.products || data.products.length === 0) {
+      const identifier = inputIsUPC ? `UPC ${trimmedInput}` : `ASIN ${trimmedInput}`;
+      throw new Error(`${identifier} not found in Keepa database`);
+    }
+
+    // Handle multiple products for UPC search
+    if (inputIsUPC && data.products.length > 1) {
+      console.log('Multiple products found for UPC:', trimmedInput);
+      
+      const productChoices = data.products.slice(0, 10).map(product => {
         let salesRank = null;
         if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
           for (const rankEntry of product.salesRanks) {
@@ -200,67 +135,23 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         multipleProducts: true,
-        upc: asin,
+        upc: trimmedInput,
         products: productChoices,
-        totalFound: upcData.products.length
+        totalFound: data.products.length
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    
-    // Regular ASIN search with enhanced parameters
-    console.log(`Regular ASIN search: ${asin}`);
-    const productUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${asin}&stats=1&history=1&offers=20`;
-    
-    console.log('Calling Keepa API with URL:', productUrl);
-    
-    const response = await fetch(productUrl);
-    
-    if (!response.ok) {
-      console.error('Product API error:', response.status, response.statusText);
-      throw new Error(`Keepa API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const responseText = await response.text();
-    console.log('Product API raw response length:', responseText.length);
-    console.log('Product API response preview:', responseText.substring(0, 500));
-    
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (jsonError) {
-      console.error('Failed to parse product response as JSON:', jsonError);
-      console.error('Response text preview:', responseText.substring(0, 200));
-      throw new Error(`Invalid JSON response from Keepa product API: ${jsonError.message}`);
-    }
-    
-    console.log('Parsed API response structure:', {
-      hasProducts: !!data.products,
-      productsLength: data.products?.length,
-      tokensUsed: data.tokensUsed,
-      tokensLeft: data.tokensLeft
-    });
-    
-    if (!data.products || data.products.length === 0) {
-      throw new Error(`ASIN ${asin} not found in Keepa database`);
-    }
 
+    // Process single product result
     const product = data.products[0];
-    console.log('Raw product data keys:', Object.keys(product));
+    console.log('Processing product:', product.asin);
     console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
     console.log('Product salesRanks:', product.salesRanks);
-    console.log('Product offerCountNew:', product.offerCountNew);
-    console.log('Product liveOffersOrder length:', product.liveOffersOrder?.length || 0);
     
     // Extract current prices from the stats object
     const currentStats = product.stats?.current || {};
     console.log('Current stats raw:', currentStats);
-    
-    // Keepa stores current prices as direct values, not nested arrays
-    const buyBoxPrice = currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null;
-    const lowestFBAPrice = currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null;
-    const lowestFBMPrice = currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null;
-    const amazonPrice = currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null;
     
     // Extract sales rank properly from salesRanks array
     let salesRank = null;
@@ -269,6 +160,7 @@ serve(async (req) => {
       for (const rankEntry of product.salesRanks) {
         if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
           salesRank = rankEntry.current;
+          console.log('Found sales rank:', salesRank);
           break;
         }
       }
@@ -303,16 +195,13 @@ serve(async (req) => {
       inStock = currentStats[12] === 1;
     }
     
-    console.log('Extracted pricing data:', {
-      buyBoxPrice,
-      lowestFBAPrice,
-      lowestFBMPrice,
-      amazonPrice,
+    console.log('Extracted data:', {
+      salesRank,
       offerCount,
       inStock,
-      salesRank,
-      liveOffersCount: product.liveOffersOrder?.length || 0,
-      currentStats12: currentStats[12]
+      buyBoxPrice: currentStats[18],
+      lowestFBAPrice: currentStats[0],
+      stockIndicator: currentStats[12]
     });
     
     // Helper function to safely process price history
@@ -364,20 +253,20 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       data: {
-        asin: asin,
+        asin: product.asin,
         title: product.title || 'Product title not available',
         manufacturer: product.manufacturer || null,
         category: product.categoryTree?.[product.categoryTree.length - 1]?.name || 'Unknown',
         imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
         
-        buyBoxPrice,
-        lowestFBAPrice,
-        lowestFBMPrice,
-        amazonPrice,
+        buyBoxPrice: currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null,
+        lowestFBAPrice: currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null,
+        lowestFBMPrice: currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null,
+        amazonPrice: currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null,
         
         fees: {
           pickAndPackFee: product.fbaFees?.pickAndPackFee ? product.fbaFees.pickAndPackFee / 100 : null,
-          referralFee: product.referralFeePercent ? (buyBoxPrice || 0) * (product.referralFeePercent / 10000) : null,
+          referralFee: product.referralFeePercent ? (currentStats[18] || 0) * (product.referralFeePercent / 10000) : null,
           storageFee: product.fbaFees?.storageFee ? product.fbaFees.storageFee / 100 : null,
           variableClosingFee: product.variableClosingFee ? product.variableClosingFee / 100 : null,
         },
@@ -393,7 +282,10 @@ serve(async (req) => {
         tokensLeft: data.tokensLeft || 0,
         processingTime: data.processingTime || 0,
         lastUpdate: new Date().toISOString(),
-        upcConversion: null
+        upcConversion: inputIsUPC ? {
+          originalUpc: trimmedInput,
+          convertedAsin: product.asin
+        } : null
       }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }

@@ -115,23 +115,13 @@ export const useAmazonProduct = () => {
         throw new Error('Invalid input format. Please enter a valid ASIN (10 characters) or UPC (12 digits).');
       }
 
-      let searchIdentifier = trimmedInput;
-      let isUpcSearch = false;
+      // The edge function now handles input detection internally
+      console.log(`Input detected as: ${inputIsUpc ? 'UPC' : 'ASIN'}`);
 
-      if (inputIsUpc) {
-        console.log('UPC detected, will use Keepa productFinder');
-        searchIdentifier = trimmedInput;
-        isUpcSearch = true;
-      } else {
-        console.log('ASIN detected, proceeding with normal lookup');
-        searchIdentifier = trimmedInput.toUpperCase();
-      }
-
-      // Call Keepa API with UPC flag
+      // Call Keepa API - the edge function will handle proper endpoint selection
       const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
         body: { 
-          asin: searchIdentifier,
-          isUpc: isUpcSearch
+          asin: trimmedInput
         }
       });
 
@@ -147,7 +137,7 @@ export const useAmazonProduct = () => {
         let errorMessage = keepaResponse?.error || 'Failed to fetch product data from Keepa';
         
         if (errorMessage.includes('not found in Keepa database')) {
-          if (isUpcSearch) {
+          if (inputIsUpc) {
             errorMessage = `UPC ${trimmedInput} was not found. This UPC may not exist on Amazon or may be discontinued.`;
           } else {
             errorMessage = `ASIN ${trimmedInput} was not found in the Keepa database.`;
