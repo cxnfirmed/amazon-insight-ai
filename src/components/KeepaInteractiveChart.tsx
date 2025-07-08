@@ -39,6 +39,10 @@ interface LineVisibility {
   offerCount: boolean;
 }
 
+interface ParsedSeries {
+  [timestamp: number]: number;
+}
+
 const TIME_RANGES = [
   { value: '1d', label: 'Day', days: 1 },
   { value: '1w', label: 'Week', days: 7 },
@@ -66,11 +70,90 @@ const COLOR_SCHEME = {
   offerCount: '#EF4444'
 };
 
-// Price validation and filtering functions
+// Keepa epoch: January 1, 2011 00:00:00 UTC
+const KEEPA_EPOCH = new Date('2011-01-01T00:00:00.000Z').getTime();
+
+// Price validation
 const isValidPrice = (price: number): boolean => {
   return price > 0.01 && price < 10000;
 };
 
+// Parse individual CSV series into timestamp-value pairs
+const parseCsvSeries = (csvArray: number[]): ParsedSeries => {
+  const series: ParsedSeries = {};
+  
+  if (!Array.isArray(csvArray) || csvArray.length < 2) {
+    return series;
+  }
+  
+  // Parse alternating [timestamp, value, timestamp, value, ...] format
+  for (let i = 0; i < csvArray.length - 1; i += 2) {
+    const timestampMinutes = csvArray[i];
+    const value = csvArray[i + 1];
+    
+    if (typeof timestampMinutes === 'number' && typeof value === 'number' && value !== -1) {
+      series[timestampMinutes] = value;
+    }
+  }
+  
+  return series;
+};
+
+// Convert Keepa timestamp to JavaScript timestamp
+const keepaTimeToMs = (keepaMinutes: number): number => {
+  return KEEPA_EPOCH + (keepaMinutes * 60 * 1000);
+};
+
+// Merge multiple series by timestamp
+const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }): ChartDataPoint[] => {
+  // Collect all unique timestamps
+  const allTimestamps = new Set<number>();
+  
+  Object.values(seriesData).forEach(series => {
+    Object.keys(series).forEach(timestamp => {
+      allTimestamps.add(Number(timestamp));
+    });
+  });
+  
+  // Sort timestamps
+  const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
+  
+  // Create merged data points
+  const dataPoints: ChartDataPoint[] = sortedTimestamps.map(keepaTimestamp => {
+    const timestampMs = keepaTimeToMs(keepaTimestamp);
+    const date = new Date(timestampMs);
+    
+    // Extract values for this timestamp from each series
+    const amazonPrice = seriesData.amazon?.[keepaTimestamp];
+    const fbaPrice = seriesData.fba?.[keepaTimestamp];
+    const fbmPrice = seriesData.fbm?.[keepaTimestamp];
+    const buyBoxPrice = seriesData.buyBox?.[keepaTimestamp];
+    const salesRank = seriesData.salesRank?.[keepaTimestamp];
+    const offerCount = seriesData.offerCount?.[keepaTimestamp];
+    const rating = seriesData.rating?.[keepaTimestamp];
+    const reviewCount = seriesData.reviewCount?.[keepaTimestamp];
+    
+    return {
+      timestamp: date.toISOString(),
+      timestampMs,
+      formattedDate: date.toLocaleDateString(),
+      // Convert prices (divide by 100) and validate
+      amazonPrice: amazonPrice ? (isValidPrice(amazonPrice / 100) ? amazonPrice / 100 : undefined) : undefined,
+      fbaPrice: fbaPrice ? (isValidPrice(fbaPrice / 100) ? fbaPrice / 100 : undefined) : undefined,
+      fbmPrice: fbmPrice ? (isValidPrice(fbmPrice / 100) ? fbmPrice / 100 : undefined) : undefined,
+      buyBoxPrice: buyBoxPrice ? (isValidPrice(buyBoxPrice / 100) ? buyBoxPrice / 100 : undefined) : undefined,
+      // Keep non-price values as-is
+      salesRank: salesRank || undefined,
+      offerCount: offerCount || undefined,
+      rating: rating ? rating / 10 : undefined, // Rating is stored as 50 = 5.0 stars
+      reviewCount: reviewCount || undefined
+    };
+  });
+  
+  return dataPoints;
+};
+
+// Filter price spikes
 const filterPriceSpikes = (data: ChartDataPoint[], field: keyof ChartDataPoint): ChartDataPoint[] => {
   if (data.length < 3) return data;
   
@@ -177,78 +260,74 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with correct structure and indices
+  // Parse Keepa CSV data with correct multi-series structure
   const chartData: ChartDataPoint[] = useMemo(() => {
     console.log('Processing chart data for product:', product.asin);
-    console.log('Product CSV data:', product.csv);
+    console.log('Product CSV data structure:', product.csv);
     
-    if (!product.csv || !Array.isArray(product.csv) || product.csv.length === 0) {
-      console.log('No CSV data found or empty array');
+    if (!product.csv || typeof product.csv !== 'object') {
+      console.log('No CSV data found or invalid format');
       return [];
     }
 
-    const csvData = product.csv;
-    console.log('Processing CSV data, length:', csvData.length);
-    console.log('First few CSV items:', csvData.slice(0, 10));
+    // Parse each CSV series separately
+    const seriesData: { [key: string]: ParsedSeries } = {};
     
-    const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
-    const dataPoints: ChartDataPoint[] = [];
+    // Map Keepa CSV indices to our data fields
+    const csvMapping = {
+      amazon: 0,        // Amazon price
+      buyBox: 3,        // Buy Box price  
+      salesRank: 4,     // Sales rank
+      offerCount: 5,    // Offer count
+      fba: 16,          // FBA price (NEW_FBA)
+      fbm: 18,          // FBM price (NEW_FBM)
+      rating: 44,       // Rating
+      reviewCount: 45   // Review count
+    };
     
-    // Process CSV data with correct alternating structure: [timestamp, values_array, timestamp, values_array, ...]
-    for (let i = 0; i < csvData.length - 1; i += 2) {
-      const timestampMinutes = csvData[i];
-      const values = csvData[i + 1];
-      
-      if (typeof timestampMinutes !== 'number' || !Array.isArray(values)) {
-        console.log('Invalid entry structure at index', i, ':', timestampMinutes, values);
-        continue;
+    // Parse each available series
+    Object.entries(csvMapping).forEach(([fieldName, csvIndex]) => {
+      const csvArray = product.csv[csvIndex];
+      if (csvArray && Array.isArray(csvArray) && csvArray.length > 0) {
+        console.log(`Parsing ${fieldName} from CSV index ${csvIndex}, length:`, csvArray.length);
+        seriesData[fieldName] = parseCsvSeries(csvArray);
+        console.log(`Parsed ${fieldName} data points:`, Object.keys(seriesData[fieldName]).length);
+      } else {
+        console.log(`No data for ${fieldName} at CSV index ${csvIndex}`);
       }
-      
-      const timestampMs = keepaEpoch + (timestampMinutes * 60 * 1000);
-      const date = new Date(timestampMs);
-      
-      if (isNaN(date.getTime())) {
-        console.log('Invalid date for timestamp:', timestampMinutes);
-        continue;
-      }
-      
-      // Extract values using correct Keepa CSV indices with price validation
-      const getValue = (index: number, divideBy100 = false) => {
-        const val = values[index];
-        if (val === null || val === undefined || val === -1) {
-          return undefined;
-        }
-        const finalVal = divideBy100 ? val / 100 : val;
-        return divideBy100 ? (isValidPrice(finalVal) ? finalVal : undefined) : finalVal;
-      };
-      
-      const dataPoint: ChartDataPoint = {
-        timestamp: date.toISOString(),
-        timestampMs,
-        formattedDate: date.toLocaleDateString(),
-        // Correct Keepa CSV indices:
-        amazonPrice: getValue(0, true),        // Amazon price (index 0)
-        fbaPrice: getValue(16, true),          // FBA price (index 16) - NEW_FBA
-        fbmPrice: getValue(18, true),          // FBM price (index 18) - NEW_FBM  
-        buyBoxPrice: getValue(3, true),        // Buy Box price (index 3) - NEW_BUYBOX
-        salesRank: getValue(4),                // Sales rank (index 4) - SALES_RANK
-        offerCount: getValue(5),               // Offer count (index 5) - OFFER_COUNT_NEW
-        rating: getValue(44) ? getValue(44) / 10 : undefined,  // Rating (index 44) - RATING
-        reviewCount: getValue(45)              // Review count (index 45) - REVIEW_COUNT
-      };
-      
-      dataPoints.push(dataPoint);
+    });
+    
+    // Log parsed series summary
+    console.log('Parsed series summary:', Object.entries(seriesData).map(([key, data]) => 
+      `${key}: ${Object.keys(data).length} points`
+    ).join(', '));
+    
+    if (Object.keys(seriesData).length === 0) {
+      console.log('No valid series data found');
+      return [];
     }
     
-    console.log('Final processed data points:', dataPoints.length);
-    console.log('Sample data points:', dataPoints.slice(0, 3));
+    // Merge all series by timestamp
+    const mergedData = mergeSeriesByTimestamp(seriesData);
+    console.log('Merged data points:', mergedData.length);
+    
+    if (mergedData.length === 0) {
+      return [];
+    }
     
     // Filter price spikes for each price field
-    let filteredData = dataPoints.sort((a, b) => a.timestampMs - b.timestampMs);
+    let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
     filteredData = filterPriceSpikes(filteredData, 'amazonPrice');
     filteredData = filterPriceSpikes(filteredData, 'fbaPrice');
     filteredData = filterPriceSpikes(filteredData, 'fbmPrice');
     filteredData = filterPriceSpikes(filteredData, 'buyBoxPrice');
+    
+    console.log('Final processed data points:', filteredData.length);
+    console.log('Sample data points:', filteredData.slice(0, 3));
+    console.log('Date range:', {
+      first: filteredData[0]?.timestamp,
+      last: filteredData[filteredData.length - 1]?.timestamp
+    });
     
     return filteredData;
   }, [product.csv, product.asin]);
@@ -315,6 +394,17 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     return null;
   };
 
+  // Debug information for CSV structure
+  const getDebugInfo = () => {
+    const csvKeys = product.csv ? Object.keys(product.csv) : [];
+    const csvSummary = csvKeys.map(key => {
+      const arr = product.csv[key];
+      return `${key}: ${Array.isArray(arr) ? arr.length : 'invalid'} items`;
+    }).join(', ');
+    
+    return `CSV structure - Keys: [${csvKeys.join(', ')}] | ${csvSummary}`;
+  };
+
   if (!filteredData.length) {
     return (
       <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-slate-200 dark:border-slate-700">
@@ -332,11 +422,13 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               <p className="text-slate-600 dark:text-slate-400 mb-2">
                 No historical price data available for the selected time range
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                CSV data length: {product.csv?.length || 0} | 
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
                 Processed points: {chartData.length} |
                 Time range: {timeRange} | 
                 Granularity: {granularity}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                {getDebugInfo()}
               </p>
               {chartData.length > 0 && (
                 <div className="flex gap-2 justify-center mt-2">
