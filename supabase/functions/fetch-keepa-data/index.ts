@@ -585,52 +585,90 @@ serve(async (req) => {
     if (isUpc) {
       console.log(`Converting UPC to ASIN using Keepa productFinder: ${asin}`);
       
-      // Use the correct Keepa productFinder API format
-      const productFinderUrl = `https://api.keepa.com/productfinder?key=${keepaApiKey}&domain=${domain}&codes=${asin}`;
+      // Try multiple approaches for UPC conversion
+      const upcFormats = [
+        asin, // Original format
+        asin.padStart(12, '0'), // Ensure 12 digits with leading zeros
+        asin.replace(/^0+/, ''), // Remove leading zeros
+      ];
       
-      try {
-        const finderResponse = await fetch(productFinderUrl);
-        console.log('Keepa productFinder response status:', finderResponse.status);
+      let conversionSuccessful = false;
+      
+      for (const upcFormat of upcFormats) {
+        if (conversionSuccessful) break;
         
-        if (!finderResponse.ok) {
-          console.log('Keepa productFinder failed with status:', finderResponse.status);
-          const errorText = await finderResponse.text();
-          console.log('Keepa productFinder error response:', errorText);
-          
-          if (finderResponse.status === 404) {
-            throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
-          } else if (finderResponse.status === 429) {
-            throw new Error(`Keepa API rate limit exceeded. Please try again in a moment.`);
-          } else if (finderResponse.status === 401 || finderResponse.status === 403) {
-            throw new Error(`Keepa API authentication failed. Please check API key configuration.`);
-          } else {
-            throw new Error(`Keepa productFinder API error: ${finderResponse.status} - ${errorText || 'Unknown error'}`);
+        console.log(`Trying UPC format: ${upcFormat}`);
+        
+        // Try both productfinder and product-finder endpoints
+        const urls = [
+          `https://api.keepa.com/productfinder?key=${keepaApiKey}&domain=${domain}&codes=${upcFormat}`,
+          `https://api.keepa.com/product-finder?key=${keepaApiKey}&domain=${domain}&codes=${upcFormat}`,
+          `https://api.keepa.com/productfinder?key=${keepaApiKey}&domain=${domain}&code=${upcFormat}`,
+        ];
+        
+        for (const productFinderUrl of urls) {
+          try {
+            console.log(`Trying URL: ${productFinderUrl}`);
+            const finderResponse = await fetch(productFinderUrl);
+            console.log('Keepa productFinder response status:', finderResponse.status);
+
+            if (finderResponse.ok) {
+              const finderData = await finderResponse.json();
+              console.log('Keepa productFinder response:', { 
+                tokensLeft: finderData.tokensLeft, 
+                productCount: finderData.products?.length,
+                hasProducts: !!finderData.products?.length
+              });
+              
+              if (finderData.products && finderData.products.length > 0) {
+                finalAsin = finderData.products[0].asin;
+                upcConversionInfo = {
+                  originalUpc: asin,
+                  convertedAsin: finalAsin,
+                  tokensUsed: finderData.tokensConsumed || 1
+                };
+                
+                console.log(`UPC ${asin} successfully converted to ASIN: ${finalAsin}`);
+                conversionSuccessful = true;
+                break;
+              }
+            } else {
+              console.log(`Failed with status ${finderResponse.status} for URL: ${productFinderUrl}`);
+            }
+          } catch (urlError) {
+            console.log(`Error with URL ${productFinderUrl}:`, urlError.message);
+            continue;
           }
         }
-
-        const finderData = await finderResponse.json();
-        console.log('Keepa productFinder response:', { 
-          tokensLeft: finderData.tokensLeft, 
-          productCount: finderData.products?.length,
-          hasProducts: !!finderData.products?.length
-        });
-        
-        if (!finderData.products || finderData.products.length === 0) {
-          throw new Error(`No Amazon product found for UPC: ${asin}. This UPC may not be sold on Amazon or may be discontinued.`);
+      }
+      
+      if (!conversionSuccessful) {
+        // Final fallback: try to search by UPC directly in the main product API
+        console.log('All productFinder attempts failed, trying direct UPC search');
+        try {
+          const directSearchUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&code=${asin}&stats=1`;
+          const directResponse = await fetch(directSearchUrl);
+          
+          if (directResponse.ok) {
+            const directData = await directResponse.json();
+            if (directData.products && directData.products.length > 0) {
+              finalAsin = directData.products[0].asin;
+              upcConversionInfo = {
+                originalUpc: asin,
+                convertedAsin: finalAsin,
+                tokensUsed: 1
+              };
+              console.log(`Direct UPC search successful: ${finalAsin}`);
+              conversionSuccessful = true;
+            }
+          }
+        } catch (directError) {
+          console.log('Direct UPC search also failed:', directError.message);
         }
-
-        finalAsin = finderData.products[0].asin;
-        upcConversionInfo = {
-          originalUpc: asin,
-          convertedAsin: finalAsin,
-          tokensUsed: finderData.tokensConsumed || 1
-        };
-        
-        console.log(`UPC ${asin} successfully converted to ASIN: ${finalAsin}`);
-        
-      } catch (error) {
-        console.error('UPC conversion failed:', error);
-        throw error;
+      }
+      
+      if (!conversionSuccessful) {
+        throw new Error(`No Amazon product found for UPC: ${asin}. This UPC may not be sold on Amazon or may be discontinued.`);
       }
     }
 
