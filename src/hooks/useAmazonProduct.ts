@@ -42,6 +42,37 @@ export const useAmazonProduct = () => {
   const [debugMode, setDebugMode] = useState(false);
   const { toast } = useToast();
 
+  const convertUpcToAsin = useCallback(async (upc: string): Promise<string> => {
+    console.log('Converting UPC to ASIN:', upc);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('convert-upc-to-asin', {
+        body: { upc }
+      });
+
+      if (error) {
+        console.error('UPC conversion error:', error);
+        throw new Error(`UPC conversion failed: ${error.message}`);
+      }
+
+      if (!data?.success) {
+        console.error('UPC conversion unsuccessful:', data);
+        throw new Error(data?.error || 'Could not convert UPC to ASIN');
+      }
+
+      console.log('UPC conversion successful:', data.data.asin);
+      return data.data.asin;
+    } catch (error) {
+      console.error('UPC conversion error:', error);
+      toast({
+        title: "UPC Conversion Failed",
+        description: `Unable to convert UPC ${upc} to ASIN: ${error.message}`,
+        variant: "destructive",
+      });
+      throw error;
+    }
+  }, [toast]);
+
   const fetchProduct = useCallback(async (asin: string, forceFresh = false) => {
     setLoading(true);
     setProduct(null);
@@ -82,19 +113,31 @@ export const useAmazonProduct = () => {
         manufacturer: keepaData.manufacturer,
         category: keepaData.category || 'Unknown',
         image_url: keepaData.imageUrl,
+        
+        // Current pricing data
         buy_box_price: keepaData.buyBoxPrice,
         lowest_fba_price: keepaData.lowestFBAPrice,
         lowest_fbm_price: keepaData.lowestFBMPrice,
         amazon_price: keepaData.amazonPrice,
+        
+        // Enhanced fee data with fallback estimates
+        fees: keepaData.fees || null,
+        
+        // Sales and inventory data
         offer_count: keepaData.offerCount || 0,
         estimated_monthly_sales: keepaData.estimatedMonthlySales,
         in_stock: keepaData.inStock || false,
+        
+        // Sales rank data
         sales_rank: keepaData.salesRank,
+        
+        // Historical data - parsed and cleaned
+        price_history: keepaData.priceHistory || [],
+        
+        // Metadata
         last_updated: keepaData.lastUpdate,
         data_source: 'Keepa',
-        fees: keepaData.fees || null,
-        debug_data: keepaResponse,
-        price_history: keepaData.priceHistory || []
+        debug_data: keepaResponse
       };
 
       console.log('Product data processed successfully:', productData.title);
@@ -146,6 +189,7 @@ export const useAmazonProduct = () => {
     debugMode,
     setDebugMode,
     fetchProduct,
-    setProduct
+    setProduct,
+    convertUpcToAsin
   };
 };

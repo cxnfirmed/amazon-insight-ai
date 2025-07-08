@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { AmazonProductAnalytics } from '@/components/AmazonProductAnalytics';
 import { Dashboard } from '@/components/Dashboard';
@@ -21,7 +20,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState('Dashboard');
   const [searchQuery, setSearchQuery] = useState('');
-  const { product, fetchProduct, loading } = useAmazonProduct();
+  const { product, fetchProduct, loading, convertUpcToAsin } = useAmazonProduct();
 
   const handleConnectAmazonAccount = () => {
     // Generate a random state parameter for security
@@ -45,11 +44,26 @@ const Index = () => {
       const isUPC = query.match(/^\d{12}$/);
       
       if (isASIN || isUPC) {
-        console.log('Valid ASIN/UPC detected, fetching fresh product data...');
-        // Force fresh fetch when user searches
-        await fetchProduct(query, true);
+        console.log('Valid ASIN/UPC detected, processing...');
+        
+        let asinToFetch = query;
+        
+        // If it's a UPC, convert it to ASIN first
+        if (isUPC) {
+          console.log('UPC detected, converting to ASIN...');
+          try {
+            asinToFetch = await convertUpcToAsin(query);
+            console.log('UPC converted to ASIN:', asinToFetch);
+          } catch (error) {
+            console.error('UPC conversion failed:', error);
+            // Show error state but don't return - let the error be handled by fetchProduct
+          }
+        }
+        
+        // Fetch product data with the ASIN (either original or converted)
+        await fetchProduct(asinToFetch, true);
         setActiveView('Product Analysis Results');
-        setSelectedProduct(query);
+        setSelectedProduct(asinToFetch);
       } else {
         // Otherwise show search results in dashboard
         setActiveView('Dashboard');
@@ -101,7 +115,7 @@ const Index = () => {
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <p className="text-slate-600 dark:text-slate-400 mb-4">
-              Unable to fetch product data for ASIN: {selectedProduct}
+              Unable to fetch product data for: {selectedProduct}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
               This could be due to API limits or the product not being available.
