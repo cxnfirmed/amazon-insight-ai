@@ -307,46 +307,21 @@ serve(async (req) => {
     
     console.log('Final offer count:', offerCount);
     
-    // IMPROVED STOCK STATUS DETERMINATION
+    // FIXED STOCK STATUS DETERMINATION
+    console.log('=== STOCK STATUS DETERMINATION ===');
     let inStock = false;
     
-    // Method 1: Check live offers for actual stock availability
+    // Primary method: Check if there are any live offers
     if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder) && product.liveOffersOrder.length > 0) {
-      console.log('Checking live offers for stock status...');
-      
-      // Check if any offer is shippable and has stock
-      for (const offer of product.liveOffersOrder) {
-        if (offer && offer.isShippable !== false) {
-          // If we have stock information and it's > 0, or if we don't have stock info but offer is shippable
-          if (!offer.stock || offer.stock > 0) {
-            inStock = true;
-            console.log('Found in-stock offer:', offer);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Method 2: Check if we have a valid buy box price (indicates availability)
-    if (!inStock && currentStats[18] !== undefined && currentStats[18] !== null && currentStats[18] !== -1) {
       inStock = true;
-      console.log('Buy box price exists, assuming in stock');
-    }
-    
-    // Method 3: Check if we have any FBA offers
-    if (!inStock && lowestFBAPrice !== null) {
-      inStock = true;
-      console.log('FBA price exists, assuming in stock');
-    }
-    
-    // Method 4: Explicit stock indicator from stats (if available)
-    if (currentStats[12] !== undefined) {
-      const explicitStock = currentStats[12] === 1;
-      console.log('Explicit stock indicator:', explicitStock);
-      inStock = explicitStock;
+      console.log('✅ Product is in stock - found', product.liveOffersOrder.length, 'live offers');
+    } else {
+      inStock = false;
+      console.log('❌ Product is out of stock - no live offers found');
     }
     
     console.log('Final stock status:', inStock);
+    console.log('=== END STOCK STATUS DETERMINATION ===');
     
     // AMAZON PRICE DETECTION - Fix the logic to properly identify Amazon as seller
     console.log('=== AMAZON PRICE DETECTION DEBUG ===');
