@@ -146,21 +146,66 @@ serve(async (req) => {
     console.log('Product stats current:', product.stats?.current);
     console.log('Product offers structure:', product.liveOffersOrder ? product.liveOffersOrder.length : 'No live offers');
     
+    // DETAILED DEBUGGING FOR SALES RANK
+    console.log('=== SALES RANK DEBUGGING ===');
+    console.log('Full product object keys:', Object.keys(product));
+    console.log('Product stats object:', product.stats);
+    console.log('Product stats.current full array:', product.stats?.current);
+    console.log('Product stats.current[0] (should be sales rank):', product.stats?.current?.[0]);
+    console.log('Product csv array length:', product.csv?.length);
+    console.log('Product csv first 10 items:', product.csv?.slice(0, 10));
+    console.log('Product csv last 10 items:', product.csv?.slice(-10));
+    console.log('Product salesRanks array:', product.salesRanks);
+    console.log('Product lastUpdate:', product.lastUpdate);
+    console.log('Product lastRankUpdate:', product.lastRankUpdate);
+    console.log('=== END SALES RANK DEBUGGING ===');
+    
     // Extract current prices from the stats object
     const currentStats = product.stats?.current || {};
     console.log('Current stats raw:', currentStats);
     
-    // SALES RANK EXTRACTION - Using official Keepa API documentation
+    // SALES RANK EXTRACTION - Let's try multiple approaches and log each one
     let salesRank = null;
     
-    // According to Keepa API docs, use the "current" field in statistics object for current sales rank
+    // Method 1: According to Keepa API docs, use the "current" field in statistics object for current sales rank
     // Index 0 in stats.current is the Amazon sales rank
     if (currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
       salesRank = currentStats[0];
-      console.log('Found current sales rank from stats.current[0]:', salesRank);
+      console.log('Method 1 - Found sales rank from stats.current[0]:', salesRank);
     }
     
-    console.log('Final sales rank:', salesRank);
+    // Method 2: Check if there's a more recent rank in the CSV data (last valid entry)
+    if (product.csv && Array.isArray(product.csv) && product.csv.length >= 2) {
+      console.log('Method 2 - Checking CSV data for sales rank...');
+      // CSV format: [time1, rank1, time2, rank2, ...] where time is in Keepa minutes
+      // Look for the most recent non-null rank
+      for (let i = product.csv.length - 1; i >= 1; i -= 2) {
+        const rank = product.csv[i];
+        if (typeof rank === 'number' && rank > 0 && rank !== -1) {
+          console.log(`Method 2 - Found sales rank from CSV at index ${i}:`, rank);
+          // If this is more recent than our current salesRank, use it
+          if (!salesRank || rank !== salesRank) {
+            console.log(`Method 2 - CSV rank ${rank} differs from stats.current[0] ${salesRank}`);
+          }
+          break;
+        }
+      }
+    }
+    
+    // Method 3: Check salesRanks array for most recent entry
+    if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
+      console.log('Method 3 - Checking salesRanks array...');
+      for (const rankEntry of product.salesRanks) {
+        if (rankEntry && typeof rankEntry.current === 'number' && rankEntry.current > 0) {
+          console.log(`Method 3 - Found sales rank from salesRanks:`, rankEntry.current, 'Category:', rankEntry.categoryId, 'LastUpdate:', rankEntry.lastUpdate);
+          if (!salesRank || rankEntry.current !== salesRank) {
+            console.log(`Method 3 - salesRanks ${rankEntry.current} differs from stats.current[0] ${salesRank}`);
+          }
+        }
+      }
+    }
+    
+    console.log('Final sales rank decision:', salesRank);
     
     // IMPROVED OFFER COUNT EXTRACTION
     let offerCount = 0;
