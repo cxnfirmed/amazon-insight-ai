@@ -20,7 +20,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState('Dashboard');
   const [searchQuery, setSearchQuery] = useState('');
-  const { product, fetchProduct, loading, convertUpcToAsin } = useAmazonProduct();
+  const { product, fetchProduct, loading } = useAmazonProduct();
 
   const handleConnectAmazonAccount = () => {
     // Generate a random state parameter for security
@@ -39,36 +39,12 @@ const Index = () => {
     console.log('Search initiated for:', query);
     setSearchQuery(query);
     if (query.trim()) {
-      // Check if it's an ASIN (10 alphanumeric characters) or UPC (12 digits)
-      const isASIN = query.match(/^[A-Z0-9]{10}$/);
-      const isUPC = query.match(/^\d{12}$/);
-      
-      if (isASIN || isUPC) {
-        console.log('Valid ASIN/UPC detected, processing...');
+      console.log('Valid input detected, processing...');
         
-        let asinToFetch = query;
-        
-        // If it's a UPC, convert it to ASIN first
-        if (isUPC) {
-          console.log('UPC detected, converting to ASIN...');
-          try {
-            asinToFetch = await convertUpcToAsin(query);
-            console.log('UPC converted to ASIN:', asinToFetch);
-          } catch (error) {
-            console.error('UPC conversion failed:', error);
-            // Show error state but don't return - let the error be handled by fetchProduct
-          }
-        }
-        
-        // Fetch product data with the ASIN (either original or converted)
-        await fetchProduct(asinToFetch, true);
-        setActiveView('Product Analysis Results');
-        setSelectedProduct(asinToFetch);
-      } else {
-        // Otherwise show search results in dashboard
-        setActiveView('Dashboard');
-        setSelectedProduct(null);
-      }
+      // Fetch product data directly - the hook will handle UPC vs ASIN detection
+      await fetchProduct(query.trim(), true);
+      setActiveView('Product Analysis Results');
+      setSelectedProduct(query.trim());
     }
   };
 
@@ -87,13 +63,30 @@ const Index = () => {
     if (product && activeView === 'Product Analysis Results') {
       console.log('Showing AmazonProductAnalytics with product:', product.title);
       return (
-        <AmazonProductAnalytics 
-          product={product}
-          onBack={() => {
-            setSelectedProduct(null);
-            setActiveView('Product Analysis');
-          }}
-        />
+        <div className="space-y-4">
+          {/* Show UPC conversion info if applicable */}
+          {product.upc_conversion && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                <span className="text-lg">🔄</span>
+                <span className="font-medium">
+                  Searched by UPC: {product.upc_conversion.originalUpc}
+                </span>
+              </div>
+              <div className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                Found ASIN: {product.upc_conversion.convertedAsin}
+              </div>
+            </div>
+          )}
+          
+          <AmazonProductAnalytics 
+            product={product}
+            onBack={() => {
+              setSelectedProduct(null);
+              setActiveView('Product Analysis');
+            }}
+          />
+        </div>
       );
     }
 
@@ -118,7 +111,7 @@ const Index = () => {
               Unable to fetch product data for: {selectedProduct}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-              This could be due to API limits or the product not being available.
+              This could be due to API limits, invalid input, or the product not being available.
             </p>
             <button 
               onClick={() => {

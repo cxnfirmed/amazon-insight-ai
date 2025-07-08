@@ -567,10 +567,10 @@ serve(async (req) => {
   }
 
   try {
-    const { asin, domain = 1 } = await req.json();
+    const { asin, domain = 1, isUpc = false } = await req.json();
     
     if (!asin) {
-      throw new Error('ASIN is required');
+      throw new Error('ASIN or UPC is required');
     }
 
     const keepaApiKey = Deno.env.get('KEEPA_API_KEY');
@@ -578,10 +578,44 @@ serve(async (req) => {
       throw new Error('Keepa API key not configured');
     }
 
-    console.log(`Fetching Keepa data for ASIN: ${asin}`);
+    let finalAsin = asin;
+    let upcConversionInfo = null;
+
+    // If this is a UPC, use Keepa's productFinder to get the ASIN
+    if (isUpc) {
+      console.log(`Converting UPC to ASIN using Keepa productFinder: ${asin}`);
+      
+      const productFinderUrl = `https://api.keepa.com/product-finder?accesskey=${keepaApiKey}&domain=${domain}&code=${asin}`;
+      
+      const finderResponse = await fetch(productFinderUrl);
+      if (!finderResponse.ok) {
+        throw new Error(`Keepa productFinder API error: ${finderResponse.status} ${finderResponse.statusText}`);
+      }
+
+      const finderData = await finderResponse.json();
+      console.log('Keepa productFinder response:', { 
+        tokensLeft: finderData.tokensLeft, 
+        productCount: finderData.products?.length 
+      });
+      
+      if (!finderData.products || finderData.products.length === 0) {
+        throw new Error(`No product found for UPC: ${asin}`);
+      }
+
+      finalAsin = finderData.products[0].asin;
+      upcConversionInfo = {
+        originalUpc: asin,
+        convertedAsin: finalAsin,
+        tokensUsed: finderData.tokensConsumed || 1
+      };
+      
+      console.log(`UPC ${asin} converted to ASIN: ${finalAsin}`);
+    }
+
+    console.log(`Fetching Keepa data for ASIN: ${finalAsin}`);
 
     // Call Keepa API with comprehensive parameters - enhanced to get fees
-    const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${asin}&stats=1&offers=50&buybox=1&history=1&rating=1&update=1&days=365&stock=1&variations=0&tracking=1&fees=1`;
+    const keepaUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=${domain}&asin=${finalAsin}&stats=1&offers=50&buybox=1&history=1&rating=1&update=1&days=365&stock=1&variations=0&tracking=1&fees=1`;
     
     const response = await fetch(keepaUrl);
     if (!response.ok) {
@@ -794,10 +828,13 @@ serve(async (req) => {
         priceHistory,
         
         // Metadata
-        tokensUsed: data.tokensConsumed || 1,
+        tokensUsed: (data.tokensConsumed || 1) + (upcConversionInfo?.tokensUsed || 0),
         tokensLeft: data.tokensLeft || 0,
         processingTime: data.processingTimeInMs || 0,
-        lastUpdate: product.lastUpdate ? keepaTimeToISO(product.lastUpdate) : null
+        lastUpdate: product.lastUpdate ? keepaTimeToISO(product.lastUpdate) : null,
+        
+        // UPC conversion info if applicable
+        upcConversion: upcConversionInfo
       }
     };
 
@@ -813,7 +850,8 @@ serve(async (req) => {
       offerCount: result.data.offerCount,
       inStock: result.data.inStock,
       monthlySales: result.data.estimatedMonthlySales,
-      salesRank: result.data.salesRank
+      salesRank: result.data.salesRank,
+      upcConversion: result.data.upcConversion
     });
 
     return new Response(JSON.stringify(result), {

@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -34,6 +33,10 @@ export interface AmazonProduct {
     salesRank?: number | null;
     offerCount?: number;
   }>;
+  upc_conversion?: {
+    originalUpc: string;
+    convertedAsin: string;
+  };
 }
 
 export const useAmazonProduct = () => {
@@ -41,6 +44,16 @@ export const useAmazonProduct = () => {
   const [loading, setLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const { toast } = useToast();
+
+  // Helper function to detect if input is a UPC (12 digits)
+  const isUpc = useCallback((input: string): boolean => {
+    return /^\d{12}$/.test(input.trim());
+  }, []);
+
+  // Helper function to detect if input is an ASIN (10 alphanumeric characters)
+  const isAsin = useCallback((input: string): boolean => {
+    return /^[A-Z0-9]{10}$/.test(input.trim().toUpperCase());
+  }, []);
 
   const convertUpcToAsin = useCallback(async (upc: string): Promise<string> => {
     console.log('Converting UPC to ASIN:', upc);
@@ -73,16 +86,40 @@ export const useAmazonProduct = () => {
     }
   }, [toast]);
 
-  const fetchProduct = useCallback(async (asin: string, forceFresh = false) => {
+  const fetchProduct = useCallback(async (input: string, forceFresh = false) => {
     setLoading(true);
     setProduct(null);
 
     try {
-      console.log('Fetching product data for ASIN:', asin);
+      const trimmedInput = input.trim();
+      console.log('Fetching product data for input:', trimmedInput);
 
-      // Call Keepa API
+      // Detect input type
+      const inputIsUpc = isUpc(trimmedInput);
+      const inputIsAsin = isAsin(trimmedInput);
+
+      if (!inputIsUpc && !inputIsAsin) {
+        throw new Error('Invalid input format. Please enter a valid ASIN (10 characters) or UPC (12 digits).');
+      }
+
+      let searchIdentifier = trimmedInput;
+      let isUpcSearch = false;
+
+      if (inputIsUpc) {
+        console.log('UPC detected, will use Keepa productFinder');
+        searchIdentifier = trimmedInput;
+        isUpcSearch = true;
+      } else {
+        console.log('ASIN detected, proceeding with normal lookup');
+        searchIdentifier = trimmedInput.toUpperCase();
+      }
+
+      // Call Keepa API with UPC flag
       const { data: keepaResponse, error: keepaError } = await supabase.functions.invoke('fetch-keepa-data', {
-        body: { asin }
+        body: { 
+          asin: searchIdentifier,
+          isUpc: isUpcSearch
+        }
       });
 
       if (keepaError) {
@@ -98,13 +135,8 @@ export const useAmazonProduct = () => {
       const keepaData = keepaResponse.data;
       console.log('Keepa API successful, processing data...', {
         title: keepaData.title,
-        buyBoxPrice: keepaData.buyBoxPrice,
-        amazonPrice: keepaData.amazonPrice,
-        lowestFBAPrice: keepaData.lowestFBAPrice,
-        lowestFBMPrice: keepaData.lowestFBMPrice,
-        offerCount: keepaData.offerCount,
-        estimatedMonthlySales: keepaData.estimatedMonthlySales,
-        fees: keepaData.fees
+        asin: keepaData.asin,
+        upcConversion: keepaData.upcConversion
       });
 
       const productData: AmazonProduct = {
@@ -134,6 +166,9 @@ export const useAmazonProduct = () => {
         // Historical data - parsed and cleaned
         price_history: keepaData.priceHistory || [],
         
+        // UPC conversion info
+        upc_conversion: keepaData.upcConversion || null,
+        
         // Metadata
         last_updated: keepaData.lastUpdate,
         data_source: 'Keepa',
@@ -143,9 +178,15 @@ export const useAmazonProduct = () => {
       console.log('Product data processed successfully:', productData.title);
       setProduct(productData);
 
+      // Show appropriate success message
+      let successMessage = `Successfully fetched data for ${productData.title}`;
+      if (keepaData.upcConversion) {
+        successMessage += ` (🔄 Searched by UPC. Found ASIN: ${keepaData.upcConversion.convertedAsin})`;
+      }
+
       toast({
         title: "Product Data Updated",
-        description: `Successfully fetched data for ${productData.title}`,
+        description: successMessage,
       });
 
     } catch (error) {
@@ -153,7 +194,7 @@ export const useAmazonProduct = () => {
       
       // Create error product object
       const errorProduct: AmazonProduct = {
-        asin,
+        asin: input,
         title: 'Error loading product',
         manufacturer: null,
         category: 'Unknown',
@@ -181,7 +222,7 @@ export const useAmazonProduct = () => {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, isUpc, isAsin]);
 
   return {
     product,
