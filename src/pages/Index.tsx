@@ -12,6 +12,7 @@ import { useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { BulkAnalysisTools } from '@/components/BulkAnalysisTools';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { ProfitabilityCalculator } from '@/components/ProfitabilityCalculator';
+import { ProductSearch } from '@/components/ProductSearch';
 import { Button } from '@/components/ui/button';
 
 const Index = () => {
@@ -59,58 +60,9 @@ const Index = () => {
   const renderActiveView = () => {
     console.log('Rendering active view:', activeView, 'Product:', product);
     
-    // Show Amazon product analytics if we have product data
-    if (product && activeView === 'Product Analysis') {
-      console.log('Showing AmazonProductAnalytics with product:', product.title);
-      return (
-        <AmazonProductAnalytics 
-          product={product}
-          onBack={() => {
-            setSelectedProduct(null);
-            setActiveView('Dashboard');
-          }}
-        />
-      );
-    }
-
-    // Show loading state while fetching product data
-    if (loading && activeView === 'Product Analysis') {
-      return (
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-slate-600 dark:text-slate-400">Fetching real Amazon product data...</p>
-          </div>
-        </div>
-      );
-    }
-
-    // Show error state if we tried to fetch a product but failed
-    if (selectedProduct && activeView === 'Product Analysis' && !product && !loading) {
-      return (
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <p className="text-slate-600 dark:text-slate-400 mb-4">
-              Unable to fetch product data for ASIN: {selectedProduct}
-            </p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-              This could be due to API limits or the product not being available.
-            </p>
-            <button 
-              onClick={() => {
-                setSelectedProduct(null);
-                setActiveView('Dashboard');
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Back to Dashboard
-            </button>
-          </div>
-        </div>
-      );
-    }
-
     switch (activeView) {
+      case 'Product Analysis':
+        return <ProductSearch />;
       case 'FBA Calculator':
         return <ProfitabilityCalculator />;
       case 'AI Insights':
@@ -172,7 +124,7 @@ const Index = () => {
         />
         
         <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-16'}`}>
-          <div className="p-6">
+          <div className={activeView === 'Product Analysis' ? '' : 'p-6'}>
             {renderActiveView()}
           </div>
         </main>
