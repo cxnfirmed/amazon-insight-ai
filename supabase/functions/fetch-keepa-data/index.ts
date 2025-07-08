@@ -335,16 +335,33 @@ serve(async (req) => {
         console.log(`Checking offer ${offerId}:`, {
           sellerId: offer.sellerId,
           hasOfferCSV: !!offer.offerCSV,
-          offerCSVLength: offer.offerCSV?.length
+          offerCSVLength: offer.offerCSV?.length,
+          fullOfferCSV: offer.offerCSV
         });
         
         if (offer.sellerId === 'ATVPDKIKX0DER') {
           console.log('✅ Found Amazon offer (seller ID: ATVPDKIKX0DER)');
+          console.log('Amazon offer full offerCSV array:', offer.offerCSV);
           
-          // Extract price from offerCSV at index 1 (second value)
-          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 2) {
-            const rawPrice = offer.offerCSV[1];
-            console.log('Amazon offer raw price from offerCSV[1]:', rawPrice);
+          // Extract the most recent price from offerCSV - use the last value which should be most current
+          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 1) {
+            // Try to get the last price value from the array (most recent)
+            const lastIndex = offer.offerCSV.length - 1;
+            let rawPrice = offer.offerCSV[lastIndex];
+            
+            console.log(`Amazon offer raw price from offerCSV[${lastIndex}] (last index):`, rawPrice);
+            
+            // If the last value is not a valid price, try the second-to-last
+            if ((!rawPrice || typeof rawPrice !== 'number' || rawPrice <= 0) && offer.offerCSV.length >= 2) {
+              rawPrice = offer.offerCSV[lastIndex - 1];
+              console.log(`Trying second-to-last value offerCSV[${lastIndex - 1}]:`, rawPrice);
+            }
+            
+            // If still not valid, try index 1 as fallback
+            if ((!rawPrice || typeof rawPrice !== 'number' || rawPrice <= 0) && offer.offerCSV.length >= 2) {
+              rawPrice = offer.offerCSV[1];
+              console.log(`Fallback to offerCSV[1]:`, rawPrice);
+            }
             
             if (typeof rawPrice === 'number' && rawPrice > 0) {
               amazonPrice = rawPrice / 100; // Convert from cents to dollars
