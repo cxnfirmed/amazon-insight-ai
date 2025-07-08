@@ -86,22 +86,51 @@ serve(async (req) => {
         // Extract sales rank properly from salesRanks array
         let salesRank = null;
         if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
-          salesRank = product.salesRanks[0].current || null;
+          // Look for the first sales rank entry that has a current value
+          for (const rankEntry of product.salesRanks) {
+            if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
+              salesRank = rankEntry.current;
+              break;
+            }
+          }
         }
         
-        // Extract offer count properly - use stats.current[2] or offerCountNew
+        // Extract offer count - try multiple sources
         let offerCount = 0;
-        if (currentStats[2] !== undefined && currentStats[2] !== -1) {
+        // First try stats.current[2] (New offers count)
+        if (currentStats[2] !== undefined && currentStats[2] !== null && currentStats[2] !== -1) {
           offerCount = currentStats[2];
-        } else if (product.offerCountNew !== undefined && product.offerCountNew !== -1) {
+        }
+        // Fallback to offerCountNew
+        else if (product.offerCountNew !== undefined && product.offerCountNew !== null && product.offerCountNew !== -1) {
           offerCount = product.offerCountNew;
+        }
+        // Try looking at live offers data if available
+        else if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
+          offerCount = product.liveOffersOrder.length;
+        }
+        
+        // Stock status - check multiple indicators
+        let inStock = true; // Default to true unless we have clear indication it's out of stock
+        // Check if the buy box price exists and is valid
+        if (currentStats[18] === undefined || currentStats[18] === null || currentStats[18] === -1) {
+          // No buy box price might indicate out of stock, but check other indicators
+          if (offerCount === 0 && (currentStats[0] === undefined || currentStats[0] === -1)) {
+            inStock = false;
+          }
+        }
+        // Override with explicit stock indicator if available
+        if (currentStats[12] !== undefined) {
+          inStock = currentStats[12] === 1;
         }
         
         console.log('Extracted data:', {
           salesRank,
           offerCount,
+          inStock,
           salesRanksArray: product.salesRanks,
-          offerCountNew: product.offerCountNew
+          offerCountNew: product.offerCountNew,
+          liveOffersOrder: product.liveOffersOrder?.length || 0
         });
         
         return new Response(JSON.stringify({
@@ -127,7 +156,7 @@ serve(async (req) => {
             
             offerCount: offerCount,
             estimatedMonthlySales: product.monthlySold || null,
-            inStock: currentStats[12] === 1,
+            inStock: inStock,
             salesRank: salesRank,
             
             priceHistory: [],
@@ -150,7 +179,12 @@ serve(async (req) => {
       const productChoices = upcData.products.slice(0, 10).map(product => {
         let salesRank = null;
         if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
-          salesRank = product.salesRanks[0].current || null;
+          for (const rankEntry of product.salesRanks) {
+            if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
+              salesRank = rankEntry.current;
+              break;
+            }
+          }
         }
         
         return {
@@ -216,8 +250,9 @@ serve(async (req) => {
     console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
     console.log('Product salesRanks:', product.salesRanks);
     console.log('Product offerCountNew:', product.offerCountNew);
+    console.log('Product liveOffersOrder length:', product.liveOffersOrder?.length || 0);
     
-    // Extract current prices from the stats object - fix the access pattern
+    // Extract current prices from the stats object
     const currentStats = product.stats?.current || {};
     console.log('Current stats raw:', currentStats);
     
@@ -226,21 +261,46 @@ serve(async (req) => {
     const lowestFBAPrice = currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null;
     const lowestFBMPrice = currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null;
     const amazonPrice = currentStats[1] !== undefined && currentStats[1] !== -1 ? currentStats[1] / 100 : null;
-    const inStock = currentStats[12] === 1;
     
     // Extract sales rank properly from salesRanks array
     let salesRank = null;
     if (product.salesRanks && Array.isArray(product.salesRanks) && product.salesRanks.length > 0) {
-      // Get the first (primary) sales rank
-      salesRank = product.salesRanks[0].current || null;
+      // Look for the first sales rank entry that has a current value
+      for (const rankEntry of product.salesRanks) {
+        if (rankEntry && rankEntry.current !== undefined && rankEntry.current !== null && rankEntry.current > 0) {
+          salesRank = rankEntry.current;
+          break;
+        }
+      }
     }
     
-    // Extract offer count properly - use stats.current[2] or offerCountNew
+    // Extract offer count - try multiple sources in order of preference
     let offerCount = 0;
-    if (currentStats[2] !== undefined && currentStats[2] !== -1) {
+    // First try stats.current[2] (New offers count)
+    if (currentStats[2] !== undefined && currentStats[2] !== null && currentStats[2] !== -1) {
       offerCount = currentStats[2];
-    } else if (product.offerCountNew !== undefined && product.offerCountNew !== -1) {
+    }
+    // Fallback to offerCountNew
+    else if (product.offerCountNew !== undefined && product.offerCountNew !== null && product.offerCountNew !== -1) {
       offerCount = product.offerCountNew;
+    }
+    // Try looking at live offers data if available
+    else if (product.liveOffersOrder && Array.isArray(product.liveOffersOrder)) {
+      offerCount = product.liveOffersOrder.length;
+    }
+    
+    // Stock status - be more intelligent about determining stock status
+    let inStock = true; // Default to true unless we have clear indication it's out of stock
+    // Check if the buy box price exists and is valid
+    if (currentStats[18] === undefined || currentStats[18] === null || currentStats[18] === -1) {
+      // No buy box price might indicate out of stock, but check other indicators
+      if (offerCount === 0 && (currentStats[0] === undefined || currentStats[0] === -1)) {
+        inStock = false;
+      }
+    }
+    // Override with explicit stock indicator if available (currentStats[12])
+    if (currentStats[12] !== undefined) {
+      inStock = currentStats[12] === 1;
     }
     
     console.log('Extracted pricing data:', {
@@ -250,7 +310,9 @@ serve(async (req) => {
       amazonPrice,
       offerCount,
       inStock,
-      salesRank
+      salesRank,
+      liveOffersCount: product.liveOffersOrder?.length || 0,
+      currentStats12: currentStats[12]
     });
     
     // Helper function to safely process price history
