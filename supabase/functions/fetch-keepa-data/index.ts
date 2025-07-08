@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -145,6 +146,7 @@ serve(async (req) => {
     console.log('Product stats structure:', product.stats ? Object.keys(product.stats) : 'No stats');
     console.log('Product stats current:', product.stats?.current);
     console.log('Product offers structure:', product.liveOffersOrder ? product.liveOffersOrder.length : 'No live offers');
+    console.log('Product offers array:', product.offers ? product.offers.length : 'No offers array');
     
     // DETAILED DEBUGGING FOR SALES RANK
     console.log('=== SALES RANK DEBUGGING ===');
@@ -181,6 +183,56 @@ serve(async (req) => {
     }
     
     console.log('Final sales rank decision:', salesRank);
+    
+    // IMPROVED FBA PRICE CALCULATION - Calculate from offers array
+    console.log('=== FBA PRICE CALCULATION ===');
+    let lowestFBAPrice = null;
+    
+    if (product.offers && Array.isArray(product.offers)) {
+      console.log('Found offers array with', product.offers.length, 'offers');
+      
+      const validFBAPrices = [];
+      
+      for (let i = 0; i < product.offers.length; i++) {
+        const offer = product.offers[i];
+        console.log(`Checking offer ${i}:`, {
+          isFBA: offer.isFBA,
+          condition: offer.condition,
+          offerCSV: offer.offerCSV ? `Array length: ${offer.offerCSV.length}` : 'No CSV data'
+        });
+        
+        // Check if this is an FBA offer with new condition
+        if (offer.isFBA === true && offer.condition === 1) {
+          // Extract the most recent price from offerCSV
+          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 3) {
+            // Get the 3rd value from the end (most recent price)
+            const recentPrice = offer.offerCSV[offer.offerCSV.length - 3];
+            if (typeof recentPrice === 'number' && recentPrice > 0) {
+              const priceInDollars = recentPrice / 100; // Convert from cents to dollars
+              validFBAPrices.push(priceInDollars);
+              console.log(`Found valid FBA price from offer ${i}: $${priceInDollars}`);
+            }
+          }
+        }
+      }
+      
+      if (validFBAPrices.length > 0) {
+        lowestFBAPrice = Math.min(...validFBAPrices);
+        console.log('Calculated lowest FBA price from offers:', lowestFBAPrice);
+      } else {
+        console.log('No valid FBA offers found with new condition');
+      }
+    } else {
+      console.log('No offers array found, falling back to stats.current[0]');
+      // Fallback to stats if offers array is not available
+      if (currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
+        lowestFBAPrice = currentStats[0] / 100;
+        console.log('Fallback FBA price from stats.current[0]:', lowestFBAPrice);
+      }
+    }
+    
+    console.log('Final FBA price decision:', lowestFBAPrice);
+    console.log('=== END FBA PRICE CALCULATION ===');
     
     // IMPROVED OFFER COUNT EXTRACTION
     let offerCount = 0;
@@ -230,7 +282,7 @@ serve(async (req) => {
     }
     
     // Method 3: Check if we have any FBA offers
-    if (!inStock && currentStats[0] !== undefined && currentStats[0] !== null && currentStats[0] !== -1) {
+    if (!inStock && lowestFBAPrice !== null) {
       inStock = true;
       console.log('FBA price exists, assuming in stock');
     }
@@ -286,7 +338,7 @@ serve(async (req) => {
       offerCount,
       inStock,
       buyBoxPrice: currentStats[18],
-      lowestFBAPrice: currentStats[0],
+      lowestFBAPrice,
       amazonPrice,
       liveOffersCount: product.liveOffersOrder?.length || 0
     });
@@ -347,7 +399,7 @@ serve(async (req) => {
         imageUrl: product.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}.jpg` : null,
         
         buyBoxPrice: currentStats[18] !== undefined && currentStats[18] !== -1 ? currentStats[18] / 100 : null,
-        lowestFBAPrice: currentStats[0] !== undefined && currentStats[0] !== -1 ? currentStats[0] / 100 : null,
+        lowestFBAPrice: lowestFBAPrice,
         lowestFBMPrice: currentStats[7] !== undefined && currentStats[7] !== -1 ? currentStats[7] / 100 : null,
         amazonPrice: amazonPrice,
         
