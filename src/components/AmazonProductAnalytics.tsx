@@ -71,6 +71,13 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
     }
   };
 
+  const formatPriceWithFallback = (value: any, fallbackText: string) => {
+    if (value === null || value === undefined) {
+      return fallbackText;
+    }
+    return typeof value === 'number' ? `$${value.toFixed(2)}` : fallbackText;
+  };
+
   const formatMonthlySales = () => {
     if (product.estimated_monthly_sales === null || product.estimated_monthly_sales === undefined) {
       return 'N/A';
@@ -326,7 +333,7 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600 dark:text-slate-400">Lowest FBA:</span>
                   <span className="font-semibold text-green-600">
-                    {formatValue(product.lowest_fba_price, 'price')}
+                    {formatPriceWithFallback(product.lowest_fba_price, 'No FBA offers')}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
