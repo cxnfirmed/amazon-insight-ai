@@ -183,16 +183,6 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                   {product.title}
                 </h2>
                 
-                {/* Star Rating Component */}
-                {product.review_rating !== null && product.review_count !== null && (
-                  <div className="mb-3">
-                    <StarRating 
-                      rating={product.review_rating} 
-                      reviewCount={product.review_count}
-                    />
-                  </div>
-                )}
-                
                 <div className="flex flex-wrap gap-2 mb-3">
                   {getStockStatusBadge()}
                   <Badge variant="secondary" className="flex items-center gap-1">
@@ -202,6 +192,16 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                   {product.brand && <Badge variant="outline">Brand: {product.brand}</Badge>}
                   {product.category && <Badge variant="outline">{product.category}</Badge>}
                 </div>
+                
+                {/* Star Rating Component - Now placed below badges */}
+                {product.review_rating !== null && product.review_count !== null && (
+                  <div className="mb-3">
+                    <StarRating 
+                      rating={product.review_rating} 
+                      reviewCount={product.review_count}
+                    />
+                  </div>
+                )}
                 
                 <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
                   <p><strong>Manufacturer:</strong> {formatValue(product.manufacturer)}</p>

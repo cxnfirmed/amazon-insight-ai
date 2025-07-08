@@ -46,7 +46,17 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                   {product.title}
                 </h2>
                 
-                {/* Star Rating Component */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {getStockBadge()}
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Package className="w-3 h-3" />
+                    {product.offer_count || 0} Offers
+                  </Badge>
+                  {product.brand && <Badge variant="outline">Brand: {product.brand}</Badge>}
+                  {product.category && <Badge variant="outline">{product.category}</Badge>}
+                </div>
+                
+                {/* Star Rating Component - Now placed below badges */}
                 {product.review_rating !== null && product.review_count !== null && (
                   <div className="mb-3">
                     <StarRating 
@@ -55,15 +65,6 @@ export const ProductInfo: React.FC<ProductInfoProps> = ({ product }) => {
                     />
                   </div>
                 )}
-                
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {getStockBadge()}
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    <Package className="w-3 h-3" />
-                    {product.offer_count || 0} Offers
-                  </Badge>
-                  {product.brand && <Badge variant="outline">Brand: {product.brand}</Badge>}
-                </div>
                 
                 <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
                   {product.category && <p><strong>Category:</strong> {product.category}</p>}
