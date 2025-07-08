@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -203,12 +204,12 @@ serve(async (req) => {
           sellerId: liveOffer.sellerId
         });
         
-        // Check if this is a live FBA offer with new condition and available for shipping
+        // Check if this is a live FBA offer with new condition
+        // Relaxed validation - only check core FBA criteria
         if (liveOffer.isFBA === true && 
             liveOffer.condition === 1 && 
             liveOffer.price && 
-            liveOffer.price > 0 && 
-            liveOffer.isShippable !== false) {
+            liveOffer.price > 0) {
           const priceInDollars = liveOffer.price / 100;
           validFBAPrices.push(priceInDollars);
           console.log(`Found valid live FBA offer ${i}: $${priceInDollars}`);
