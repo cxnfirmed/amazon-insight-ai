@@ -3,9 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ComposedChart, Bar } from 'recharts';
 import { AmazonProduct } from '@/hooks/useAmazonProduct';
 import { Badge } from '@/components/ui/badge';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 interface KeepaInteractiveChartProps {
   product: AmazonProduct;
@@ -23,7 +25,6 @@ interface ChartDataPoint {
   reviewCount?: number;
   rating?: number;
   offerCount?: number;
-  soldPastMonth?: number;
   formattedDate: string;
 }
 
@@ -36,7 +37,6 @@ interface LineVisibility {
   reviewCount: boolean;
   rating: boolean;
   offerCount: boolean;
-  soldPastMonth: boolean;
 }
 
 const TIME_RANGES = [
@@ -48,16 +48,114 @@ const TIME_RANGES = [
   { value: 'all', label: 'All Time', days: null }
 ];
 
+const GRANULARITY_OPTIONS = [
+  { value: 'raw', label: 'All Data' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' }
+];
+
 const COLOR_SCHEME = {
-  amazonPrice: '#FF9500', // Orange
-  fbaPrice: '#3B82F6', // Blue
-  fbmPrice: '#EC4899', // Pink
-  buyBoxPrice: '#6B7280', // Gray
-  salesRank: '#10B981', // Green
-  reviewCount: '#8B5CF6', // Purple
-  rating: '#F59E0B', // Amber
-  offerCount: '#EF4444', // Red
-  soldPastMonth: '#06B6D4' // Cyan
+  amazonPrice: '#FF9500',
+  fbaPrice: '#3B82F6',
+  fbmPrice: '#EC4899',
+  buyBoxPrice: '#6B7280',
+  salesRank: '#10B981',
+  reviewCount: '#8B5CF6',
+  rating: '#F59E0B',
+  offerCount: '#EF4444'
+};
+
+// Price validation and filtering functions
+const isValidPrice = (price: number): boolean => {
+  return price > 0.01 && price < 10000;
+};
+
+const filterPriceSpikes = (data: ChartDataPoint[], field: keyof ChartDataPoint): ChartDataPoint[] => {
+  if (data.length < 3) return data;
+  
+  return data.map((point, index) => {
+    const value = point[field] as number;
+    if (!value || isNaN(value)) return point;
+    
+    // Check surrounding points for context
+    const prevPoint = index > 0 ? data[index - 1] : null;
+    const nextPoint = index < data.length - 1 ? data[index + 1] : null;
+    
+    const prevValue = prevPoint?.[field] as number;
+    const nextValue = nextPoint?.[field] as number;
+    
+    // If current value is 10x+ different from both neighbors, it's likely a spike
+    if (prevValue && nextValue) {
+      const avgNeighbor = (prevValue + nextValue) / 2;
+      if (value > avgNeighbor * 10 || value < avgNeighbor / 10) {
+        return { ...point, [field]: undefined };
+      }
+    }
+    
+    return point;
+  });
+};
+
+// Data aggregation functions
+const aggregateData = (data: ChartDataPoint[], granularity: string): ChartDataPoint[] => {
+  if (granularity === 'raw' || data.length === 0) return data;
+  
+  const sortedData = [...data].sort((a, b) => a.timestampMs - b.timestampMs);
+  const aggregated: ChartDataPoint[] = [];
+  
+  let groupSize: number;
+  switch (granularity) {
+    case 'daily': groupSize = 24 * 60 * 60 * 1000; break;
+    case 'weekly': groupSize = 7 * 24 * 60 * 60 * 1000; break;
+    case 'monthly': groupSize = 30 * 24 * 60 * 60 * 1000; break;
+    default: return sortedData;
+  }
+  
+  let currentGroup: ChartDataPoint[] = [];
+  let currentGroupStart = Math.floor(sortedData[0].timestampMs / groupSize) * groupSize;
+  
+  for (const point of sortedData) {
+    const pointGroup = Math.floor(point.timestampMs / groupSize) * groupSize;
+    
+    if (pointGroup === currentGroupStart) {
+      currentGroup.push(point);
+    } else {
+      if (currentGroup.length > 0) {
+        aggregated.push(aggregateGroup(currentGroup, currentGroupStart));
+      }
+      currentGroup = [point];
+      currentGroupStart = pointGroup;
+    }
+  }
+  
+  if (currentGroup.length > 0) {
+    aggregated.push(aggregateGroup(currentGroup, currentGroupStart));
+  }
+  
+  return aggregated;
+};
+
+const aggregateGroup = (group: ChartDataPoint[], groupStart: number): ChartDataPoint => {
+  const validPrices = (field: keyof ChartDataPoint) =>
+    group.map(p => p[field] as number).filter(v => v && !isNaN(v));
+  
+  const avg = (values: number[]) => values.length > 0 ? values.reduce((a, b) => a + b) / values.length : undefined;
+  const last = (values: number[]) => values.length > 0 ? values[values.length - 1] : undefined;
+  
+  return {
+    timestamp: new Date(groupStart).toISOString(),
+    timestampMs: groupStart,
+    formattedDate: new Date(groupStart).toLocaleDateString(),
+    amazonPrice: avg(validPrices('amazonPrice')),
+    fbaPrice: avg(validPrices('fbaPrice')),
+    fbmPrice: avg(validPrices('fbmPrice')),
+    buyBoxPrice: avg(validPrices('buyBoxPrice')),
+    salesRank: last(validPrices('salesRank')), // Use last known rank
+    reviewCount: last(validPrices('reviewCount')),
+    rating: avg(validPrices('rating')),
+    offerCount: avg(validPrices('offerCount'))
+  };
 };
 
 export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({ 
@@ -65,7 +163,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   title = "Keepa Price & Sales History" 
 }) => {
   const [timeRange, setTimeRange] = useState('all');
+  const [granularity, setGranularity] = useState('raw');
   const [chartMode, setChartMode] = useState<'price' | 'sales' | 'reviews'>('price');
+  const [fillGaps, setFillGaps] = useState(false);
   const [lineVisibility, setLineVisibility] = useState<LineVisibility>({
     amazonPrice: true,
     fbaPrice: true,
@@ -74,16 +174,13 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     salesRank: false,
     reviewCount: false,
     rating: false,
-    offerCount: false,
-    soldPastMonth: false
+    offerCount: false
   });
 
-  // Parse Keepa CSV data into chart-friendly format
+  // Parse Keepa CSV data with correct structure and indices
   const chartData: ChartDataPoint[] = useMemo(() => {
     console.log('Processing chart data for product:', product.asin);
     console.log('Product CSV data:', product.csv);
-    console.log('CSV data type:', typeof product.csv);
-    console.log('CSV data length:', product.csv?.length);
     
     if (!product.csv || !Array.isArray(product.csv) || product.csv.length === 0) {
       console.log('No CSV data found or empty array');
@@ -91,30 +188,20 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     }
 
     const csvData = product.csv;
-    const stats = product.debug_data?.data?.stats || {};
-    
     console.log('Processing CSV data, length:', csvData.length);
-    console.log('First few CSV items:', csvData.slice(0, 5));
+    console.log('First few CSV items:', csvData.slice(0, 10));
     
     const keepaEpoch = new Date('2011-01-01T00:00:00.000Z').getTime();
     const dataPoints: ChartDataPoint[] = [];
     
-    // Process each CSV entry
-    csvData.forEach((entry, index) => {
-      console.log(`Processing entry ${index}:`, entry);
+    // Process CSV data with correct alternating structure: [timestamp, values_array, timestamp, values_array, ...]
+    for (let i = 0; i < csvData.length - 1; i += 2) {
+      const timestampMinutes = csvData[i];
+      const values = csvData[i + 1];
       
-      // Handle the nested array structure from Keepa CSV
-      if (!Array.isArray(entry) || entry.length < 2) {
-        console.log('Invalid entry structure - not array or too short:', entry);
-        return;
-      }
-      
-      const timestampMinutes = entry[0];
-      const values = entry.slice(1); // All values after timestamp
-      
-      if (typeof timestampMinutes !== 'number' || timestampMinutes < 0) {
-        console.log('Invalid timestamp at index', index, ':', timestampMinutes);
-        return;
+      if (typeof timestampMinutes !== 'number' || !Array.isArray(values)) {
+        console.log('Invalid entry structure at index', i, ':', timestampMinutes, values);
+        continue;
       }
       
       const timestampMs = keepaEpoch + (timestampMinutes * 60 * 1000);
@@ -122,75 +209,86 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       
       if (isNaN(date.getTime())) {
         console.log('Invalid date for timestamp:', timestampMinutes);
-        return;
+        continue;
       }
       
-      console.log(`Entry ${index} - timestamp: ${timestampMinutes}, date: ${date.toISOString()}, values:`, values);
-      
-      // Extract values from the array - handling null/-1 as undefined
-      const getValue = (index: number) => {
+      // Extract values using correct Keepa CSV indices with price validation
+      const getValue = (index: number, divideBy100 = false) => {
         const val = values[index];
         if (val === null || val === undefined || val === -1) {
           return undefined;
         }
-        return val;
+        const finalVal = divideBy100 ? val / 100 : val;
+        return divideBy100 ? (isValidPrice(finalVal) ? finalVal : undefined) : finalVal;
       };
       
       const dataPoint: ChartDataPoint = {
         timestamp: date.toISOString(),
         timestampMs,
         formattedDate: date.toLocaleDateString(),
-        amazonPrice: getValue(0) ? getValue(0) / 100 : undefined,
-        fbaPrice: getValue(1) ? getValue(1) / 100 : undefined,
-        fbmPrice: getValue(3) ? getValue(3) / 100 : undefined,
-        buyBoxPrice: getValue(4) ? getValue(4) / 100 : undefined,
-        salesRank: getValue(5),
-        offerCount: getValue(20),
-        rating: getValue(42) ? getValue(42) / 10 : undefined,
-        reviewCount: getValue(44),
-        soldPastMonth: stats.sold30 || stats.buyBoxShipped30 || undefined
+        // Correct Keepa CSV indices:
+        amazonPrice: getValue(0, true),        // Amazon price (index 0)
+        fbaPrice: getValue(16, true),          // FBA price (index 16) - NEW_FBA
+        fbmPrice: getValue(18, true),          // FBM price (index 18) - NEW_FBM  
+        buyBoxPrice: getValue(3, true),        // Buy Box price (index 3) - NEW_BUYBOX
+        salesRank: getValue(4),                // Sales rank (index 4) - SALES_RANK
+        offerCount: getValue(5),               // Offer count (index 5) - OFFER_COUNT_NEW
+        rating: getValue(44) ? getValue(44) / 10 : undefined,  // Rating (index 44) - RATING
+        reviewCount: getValue(45)              // Review count (index 45) - REVIEW_COUNT
       };
       
-      console.log(`Generated data point ${index}:`, dataPoint);
       dataPoints.push(dataPoint);
-    });
+    }
     
     console.log('Final processed data points:', dataPoints.length);
     console.log('Sample data points:', dataPoints.slice(0, 3));
-    return dataPoints.sort((a, b) => a.timestampMs - b.timestampMs);
-  }, [product.csv, product.debug_data]);
+    
+    // Filter price spikes for each price field
+    let filteredData = dataPoints.sort((a, b) => a.timestampMs - b.timestampMs);
+    filteredData = filterPriceSpikes(filteredData, 'amazonPrice');
+    filteredData = filterPriceSpikes(filteredData, 'fbaPrice');
+    filteredData = filterPriceSpikes(filteredData, 'fbmPrice');
+    filteredData = filterPriceSpikes(filteredData, 'buyBoxPrice');
+    
+    return filteredData;
+  }, [product.csv, product.asin]);
+
+  // Apply granularity aggregation
+  const aggregatedData = useMemo(() => {
+    return aggregateData(chartData, granularity);
+  }, [chartData, granularity]);
 
   // Filter data based on time range
   const filteredData = useMemo(() => {
-    if (!chartData.length) {
-      console.log('No chart data to filter');
+    if (!aggregatedData.length) {
+      console.log('No aggregated data to filter');
       return [];
     }
     
     if (timeRange === 'all') {
-      console.log('Using all time range, returning all data:', chartData.length);
-      return chartData;
+      console.log('Using all time range, returning all data:', aggregatedData.length);
+      return aggregatedData;
     }
     
     const range = TIME_RANGES.find(r => r.value === timeRange);
     if (!range || !range.days) {
       console.log('Invalid time range, returning all data:', timeRange);
-      return chartData;
+      return aggregatedData;
     }
     
     const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
-    const filtered = chartData.filter(point => point.timestampMs >= cutoffTime);
+    const filtered = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
     
     console.log(`Time range filter '${timeRange}' (${range.days} days):`, {
-      originalCount: chartData.length,
+      originalCount: aggregatedData.length,
       filteredCount: filtered.length,
       cutoffTime: new Date(cutoffTime).toISOString(),
-      oldestDataPoint: chartData[0]?.timestamp,
-      newestDataPoint: chartData[chartData.length - 1]?.timestamp
+      oldestDataPoint: aggregatedData[0]?.timestamp,
+      newestDataPoint: aggregatedData[aggregatedData.length - 1]?.timestamp
     });
     
     return filtered;
-  }, [chartData, timeRange]);
+  }, [aggregatedData, timeRange]);
 
   const toggleLineVisibility = (line: keyof LineVisibility) => {
     setLineVisibility(prev => ({
@@ -236,19 +334,27 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 CSV data length: {product.csv?.length || 0} | 
-                Debug CSV: {product.debug_data?.data?.csv?.length || 0} |
                 Processed points: {chartData.length} |
-                Time range: {timeRange}
+                Time range: {timeRange} | 
+                Granularity: {granularity}
               </p>
               {chartData.length > 0 && (
-                <Button
-                  onClick={() => setTimeRange('all')}
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                >
-                  Show All Time Data
-                </Button>
+                <div className="flex gap-2 justify-center mt-2">
+                  <Button
+                    onClick={() => setTimeRange('all')}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Show All Time Data
+                  </Button>
+                  <Button
+                    onClick={() => setGranularity('raw')}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Show Raw Data
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -260,53 +366,67 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   return (
     <Card className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-slate-200 dark:border-slate-700">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            {title}
-            <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-              Live Keepa Data
-            </Badge>
-          </CardTitle>
-          
-          {/* Time Range Controls */}
-          <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
-            {TIME_RANGES.map((range) => (
-              <Button
-                key={range.value}
-                variant={timeRange === range.value ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setTimeRange(range.value)}
-                className="text-xs"
-              >
-                {range.label}
-              </Button>
-            ))}
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              {title}
+              <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                Live Keepa Data ({filteredData.length} points)
+              </Badge>
+            </CardTitle>
+            
+            {/* Time Range Controls */}
+            <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
+              {TIME_RANGES.map((range) => (
+                <Button
+                  key={range.value}
+                  variant={timeRange === range.value ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setTimeRange(range.value)}
+                  className="text-xs"
+                >
+                  {range.label}
+                </Button>
+              ))}
+            </div>
           </div>
-        </div>
-        
-        {/* Chart Mode Controls */}
-        <div className="flex gap-2 mt-2">
-          <Button
-            variant={chartMode === 'price' ? "default" : "outline"}
-            size="sm"
-            onClick={() => setChartMode('price')}
-          >
-            Price History
-          </Button>
-          <Button
-            variant={chartMode === 'sales' ? "default" : "outline"}
-            size="sm"
-            onClick={() => setChartMode('sales')}
-          >
-            Sales Data
-          </Button>
-          <Button
-            variant={chartMode === 'reviews' ? "default" : "outline"}
-            size="sm"
-            onClick={() => setChartMode('reviews')}
-          >
-            Reviews
-          </Button>
+          
+          {/* Controls Row */}
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Chart Mode Controls */}
+            <ToggleGroup value={chartMode} onValueChange={(value) => value && setChartMode(value as any)} type="single">
+              <ToggleGroupItem value="price" size="sm">Price History</ToggleGroupItem>
+              <ToggleGroupItem value="sales" size="sm">Sales Data</ToggleGroupItem>
+              <ToggleGroupItem value="reviews" size="sm">Reviews</ToggleGroupItem>
+            </ToggleGroup>
+            
+            {/* Granularity Control */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="granularity" className="text-sm">Data:</Label>
+              <Select value={granularity} onValueChange={setGranularity}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GRANULARITY_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Fill Gaps Toggle */}
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="fill-gaps"
+                checked={fillGaps}
+                onCheckedChange={setFillGaps}
+              />
+              <Label htmlFor="fill-gaps" className="text-sm">Fill Gaps</Label>
+            </div>
+          </div>
         </div>
       </CardHeader>
       
@@ -393,18 +513,6 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                     Offer Count
                   </Label>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="sold-past-month"
-                    checked={lineVisibility.soldPastMonth}
-                    onCheckedChange={() => toggleLineVisibility('soldPastMonth')}
-                  />
-                  <Label htmlFor="sold-past-month" className="text-xs">
-                    <span className="inline-block w-3 h-3 rounded-full mr-1" 
-                          style={{ backgroundColor: COLOR_SCHEME.soldPastMonth }}></span>
-                    Monthly Sold
-                  </Label>
-                </div>
               </>
             )}
             
@@ -476,7 +584,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="Amazon Price"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                   {lineVisibility.fbaPrice && (
@@ -487,7 +595,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="FBA Price"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                   {lineVisibility.fbmPrice && (
@@ -498,7 +606,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="FBM Price"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                   {lineVisibility.buyBoxPrice && (
@@ -509,7 +617,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="Buy Box Price"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                 </>
@@ -526,7 +634,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="Sales Rank"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                   {lineVisibility.offerCount && (
@@ -537,15 +645,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="Offer Count"
                       dot={false}
-                      connectNulls={false}
-                    />
-                  )}
-                  {lineVisibility.soldPastMonth && (
-                    <Bar 
-                      dataKey="soldPastMonth" 
-                      fill={COLOR_SCHEME.soldPastMonth}
-                      name="Monthly Sold"
-                      opacity={0.6}
+                      connectNulls={fillGaps}
                     />
                   )}
                 </>
@@ -562,7 +662,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="Review Count"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                   {lineVisibility.rating && (
@@ -573,7 +673,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       strokeWidth={2}
                       name="Rating"
                       dot={false}
-                      connectNulls={false}
+                      connectNulls={fillGaps}
                     />
                   )}
                 </>
@@ -584,7 +684,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         
         {/* Chart Info */}
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} data points from Keepa API | 
+          Showing {filteredData.length} data points ({granularity} granularity) from Keepa API | 
           Last updated: {product.last_updated ? new Date(product.last_updated).toLocaleString() : 'Unknown'}
         </div>
       </CardContent>
