@@ -50,11 +50,29 @@ serve(async (req) => {
       console.log('Calling productFinder with URL:', finderUrl);
       
       const finderResponse = await fetch(finderUrl);
-      const finderData = await finderResponse.json();
       
-      console.log('ProductFinder response:', JSON.stringify(finderData, null, 2));
+      // Check if response is ok before parsing
+      if (!finderResponse.ok) {
+        console.error('ProductFinder API error:', finderResponse.status, finderResponse.statusText);
+        throw new Error(`Keepa productFinder API error: ${finderResponse.status} ${finderResponse.statusText}`);
+      }
       
-      if (!finderResponse.ok || !finderData.asinList || finderData.asinList.length === 0) {
+      // Get response text first to check if it's valid JSON
+      const finderResponseText = await finderResponse.text();
+      console.log('ProductFinder raw response:', finderResponseText);
+      
+      let finderData;
+      try {
+        finderData = JSON.parse(finderResponseText);
+      } catch (jsonError) {
+        console.error('Failed to parse productFinder response as JSON:', jsonError);
+        console.error('Response text:', finderResponseText);
+        throw new Error(`Invalid JSON response from Keepa productFinder API: ${jsonError.message}`);
+      }
+      
+      console.log('ProductFinder parsed response:', JSON.stringify(finderData, null, 2));
+      
+      if (!finderData.asinList || finderData.asinList.length === 0) {
         throw new Error(`UPC ${asin} not found in Keepa database. This UPC may not exist or may not be available on Amazon.`);
       }
 
@@ -65,7 +83,21 @@ serve(async (req) => {
         try {
           const productUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${foundAsin}&stats=1&history=1`;
           const productResponse = await fetch(productUrl);
-          const productData = await productResponse.json();
+          
+          if (!productResponse.ok) {
+            console.log(`Product API error for ASIN ${foundAsin}:`, productResponse.status, productResponse.statusText);
+            continue;
+          }
+          
+          const productResponseText = await productResponse.text();
+          let productData;
+          
+          try {
+            productData = JSON.parse(productResponseText);
+          } catch (jsonError) {
+            console.log(`Failed to parse product response for ASIN ${foundAsin}:`, jsonError);
+            continue;
+          }
           
           if (productData.products && productData.products.length > 0) {
             const product = productData.products[0];
@@ -100,10 +132,23 @@ serve(async (req) => {
     const productUrl = `https://api.keepa.com/product?key=${keepaApiKey}&domain=1&asin=${asin}&stats=1&history=1`;
     
     const response = await fetch(productUrl);
-    const data = await response.json();
     
     if (!response.ok) {
+      console.error('Product API error:', response.status, response.statusText);
       throw new Error(`Keepa API error: ${response.status} ${response.statusText}`);
+    }
+    
+    // Get response text first to check if it's valid JSON
+    const responseText = await response.text();
+    console.log('Product API raw response length:', responseText.length);
+    
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (jsonError) {
+      console.error('Failed to parse product response as JSON:', jsonError);
+      console.error('Response text preview:', responseText.substring(0, 200));
+      throw new Error(`Invalid JSON response from Keepa product API: ${jsonError.message}`);
     }
     
     if (!data.products || data.products.length === 0) {
