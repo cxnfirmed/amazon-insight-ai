@@ -386,6 +386,28 @@ serve(async (req) => {
     console.log('Final Amazon price decision:', amazonPrice);
     console.log('=== END AMAZON PRICE DETECTION DEBUG ===');
     
+    // REVIEW RATING AND COUNT EXTRACTION
+    console.log('=== REVIEW RATING AND COUNT EXTRACTION ===');
+    let reviewRating = null;
+    let reviewCount = null;
+    
+    // Extract review rating from stats.current[16] (average rating)
+    if (currentStats[16] !== undefined && currentStats[16] !== null && currentStats[16] !== -1) {
+      // Keepa stores rating as integer out of 50 (e.g., 45 = 4.5 stars)
+      reviewRating = currentStats[16] / 10;
+      console.log('Review rating from stats.current[16]:', reviewRating);
+    }
+    
+    // Extract review count from stats.current[17] (review count)
+    if (currentStats[17] !== undefined && currentStats[17] !== null && currentStats[17] !== -1) {
+      reviewCount = currentStats[17];
+      console.log('Review count from stats.current[17]:', reviewCount);
+    }
+    
+    console.log('Final review rating:', reviewRating);
+    console.log('Final review count:', reviewCount);
+    console.log('=== END REVIEW RATING AND COUNT EXTRACTION ===');
+    
     // Log the final extracted data for debugging
     console.log('Extracted data summary:', {
       salesRank,
@@ -394,6 +416,8 @@ serve(async (req) => {
       buyBoxPrice: currentStats[18],
       lowestFBAPrice,
       amazonPrice,
+      reviewRating,
+      reviewCount,
       liveOffersCount: product.liveOffersOrder?.length || 0
     });
     
@@ -469,6 +493,9 @@ serve(async (req) => {
         estimatedMonthlySales: product.monthlySold || null,
         inStock,
         salesRank: salesRank,
+        
+        reviewRating: reviewRating,
+        reviewCount: reviewCount,
         
         priceHistory: processPriceHistory(product.csv),
         

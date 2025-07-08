@@ -21,6 +21,7 @@ import {
 import { AmazonProduct, useAmazonProduct } from '@/hooks/useAmazonProduct';
 import { EnhancedPriceHistoryChart } from '@/components/EnhancedPriceHistoryChart';
 import { KeepaFeeCalculator } from '@/components/KeepaFeeCalculator';
+import { StarRating } from '@/components/StarRating';
 
 interface AmazonProductAnalyticsProps {
   product: AmazonProduct;
@@ -181,6 +182,16 @@ export const AmazonProductAnalytics: React.FC<AmazonProductAnalyticsProps> = ({
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                   {product.title}
                 </h2>
+                
+                {/* Star Rating Component */}
+                {product.review_rating !== null && product.review_count !== null && (
+                  <div className="mb-3">
+                    <StarRating 
+                      rating={product.review_rating} 
+                      reviewCount={product.review_count}
+                    />
+                  </div>
+                )}
                 
                 <div className="flex flex-wrap gap-2 mb-3">
                   {getStockStatusBadge()}

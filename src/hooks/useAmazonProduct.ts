@@ -18,6 +18,8 @@ export interface AmazonProduct {
   estimated_monthly_sales: number | null;
   in_stock: boolean;
   sales_rank: number | null;
+  review_rating: number | null;
+  review_count: number | null;
   last_updated: string | null;
   data_source: 'Keepa' | 'Error';
   debug_data?: any;
@@ -204,6 +206,10 @@ export const useAmazonProduct = () => {
         // Sales rank data
         sales_rank: keepaData.salesRank,
         
+        // Review data
+        review_rating: keepaData.reviewRating,
+        review_count: keepaData.reviewCount,
+        
         // Historical data - parsed and cleaned
         price_history: keepaData.priceHistory || [],
         
@@ -249,6 +255,8 @@ export const useAmazonProduct = () => {
         estimated_monthly_sales: null,
         in_stock: false,
         sales_rank: null,
+        review_rating: null,
+        review_count: null,
         last_updated: null,
         data_source: 'Error',
         debug_data: { error: error.message }
