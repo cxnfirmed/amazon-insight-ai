@@ -43,10 +43,15 @@ interface ParsedSeries {
   [timestamp: number]: number;
 }
 
-interface LiveOffer {
+interface BuyBoxSellerHistory {
   timestamp: number;
-  price: number;
-  seller: string;
+  sellerId: string;
+}
+
+interface SellerOffer {
+  sellerId: string;
+  sellerName: string;
+  offerCSV: number[]; // [timestamp, price, timestamp, price, ...]
   condition: string;
   prime: boolean;
 }
@@ -57,20 +62,19 @@ interface DataQualityStats {
   filteredPoints: number;
   buyBoxValidationStats: {
     rawBuyBoxPoints: number;
-    liveOfferRejected: number;
-    basicValidationRejected: number;
+    sellerIdNotFound: number;
+    sellerOfferNotFound: number;
+    priceNotFound: number;
+    priceMismatch: number;
     finalValidPoints: number;
-    rejectedExamples: Array<{
+    validationExamples: Array<{
       timestamp: number;
       buyBoxPrice: number;
-      availableOffers: LiveOffer[];
-      reason: string;
-    }>;
-    acceptedExamples: Array<{
-      timestamp: number;
-      buyBoxPrice: number;
-      matchedOffer: LiveOffer;
+      sellerId: string;
+      sellerPrice: number;
       priceDifference: number;
+      status: 'valid' | 'rejected';
+      reason?: string;
     }>;
   };
   seriesStats: {
@@ -123,148 +127,259 @@ const keepaTimeToMs = (keepaMinutes: number): number => {
   return KEEPA_EPOCH + (keepaMinutes * 60 * 1000);
 };
 
-// Parse offers data from CSV or product.offers
-const parseOffersData = (product: AmazonProduct): LiveOffer[] => {
-  const offers: LiveOffer[] = [];
+// Parse Buy Box seller ID history from CSV
+const parseBuyBoxSellerHistory = (product: AmazonProduct): BuyBoxSellerHistory[] => {
+  const history: BuyBoxSellerHistory[] = [];
   
-  console.log('=== PARSING LIVE OFFERS DATA ===');
+  console.log('=== PARSING BUY BOX SELLER ID HISTORY ===');
   
-  // Check if we have offers in the product data
+  // Buy Box seller ID history is typically in CSV index 4 or 5
+  // Let's check multiple possible indices
+  const possibleIndices = [4, 5, 6, 7];
+  let buyBoxSellerCSV: number[] | null = null;
+  let usedIndex = -1;
+  
+  for (const index of possibleIndices) {
+    const csvArray = product.csv?.[index];
+    if (csvArray && Array.isArray(csvArray) && csvArray.length > 0) {
+      // Check if this looks like seller ID data (should be alternating timestamp/sellerID)
+      if (csvArray.length >= 4 && typeof csvArray[0] === 'number' && typeof csvArray[1] === 'number') {
+        buyBoxSellerCSV = csvArray;
+        usedIndex = index;
+        console.log(`Found Buy Box seller history in CSV[${index}]: ${csvArray.length / 2} data points`);
+        break;
+      }
+    }
+  }
+  
+  if (!buyBoxSellerCSV) {
+    console.log('❌ No Buy Box seller ID history found in CSV data');
+    return history;
+  }
+  
+  // Parse alternating [timestamp, sellerId] format
+  for (let i = 0; i < buyBoxSellerCSV.length - 1; i += 2) {
+    const timestampMinutes = buyBoxSellerCSV[i];
+    const sellerId = buyBoxSellerCSV[i + 1];
+    
+    if (typeof timestampMinutes === 'number' && typeof sellerId === 'number' && sellerId !== -1) {
+      history.push({
+        timestamp: timestampMinutes,
+        sellerId: sellerId.toString()
+      });
+    }
+  }
+  
+  // Sort by timestamp
+  history.sort((a, b) => a.timestamp - b.timestamp);
+  
+  console.log(`Parsed ${history.length} Buy Box seller ID changes`);
+  console.log(`Timestamp range: ${history.length > 0 ? `${new Date(keepaTimeToMs(history[0].timestamp)).toISOString()} to ${new Date(keepaTimeToMs(history[history.length - 1].timestamp)).toISOString()}` : 'No data'}`);
+  
+  return history;
+};
+
+// Parse seller offers with their individual price histories
+const parseSellerOffers = (product: AmazonProduct): SellerOffer[] => {
+  const offers: SellerOffer[] = [];
+  
+  console.log('=== PARSING SELLER OFFERS DATA ===');
+  
+  // Check for offers data in the product
   if (product.offers && Array.isArray(product.offers)) {
     console.log(`Found ${product.offers.length} current offers in product.offers`);
     
-    // Add current offers (these are live now, so we'll use current timestamp)
-    const currentTimestamp = Math.floor((Date.now() - KEEPA_EPOCH) / (60 * 1000));
-    
     product.offers.forEach((offer: any, index: number) => {
       if (offer.price > 0) {
+        // For current offers, we don't have historical CSV data
+        // We'll create a synthetic entry with current timestamp
+        const currentTimestamp = Math.floor((Date.now() - KEEPA_EPOCH) / (60 * 1000));
+        
         offers.push({
-          timestamp: currentTimestamp,
-          price: offer.price,
-          seller: offer.seller || `Seller ${index + 1}`,
+          sellerId: offer.sellerId || `seller_${index}`,
+          sellerName: offer.seller || `Seller ${index + 1}`,
+          offerCSV: [currentTimestamp, Math.round(offer.price * 100)], // Convert to Keepa format
           condition: offer.condition || 'New',
           prime: offer.prime || false
         });
         
-        console.log(`Current Offer ${index + 1}: $${offer.price} from ${offer.seller || 'Unknown'} (${offer.condition || 'New'})`);
+        console.log(`Current Offer ${index + 1}: ${offer.seller || 'Unknown'} (ID: ${offer.sellerId || 'unknown'}) - $${offer.price}`);
       }
     });
   }
   
-  // Parse historical offers from CSV if available
-  // Note: Keepa CSV format for offers is complex and varies by subscription level
-  // For now, we'll work with the basic price series and assume they represent offers
+  // Look for historical offers data in CSV
+  // Keepa stores individual seller offer histories in higher CSV indices
+  // This is subscription-dependent, but let's check common indices
+  const offerIndices = Array.from({ length: 20 }, (_, i) => i + 20); // CSV[20] onwards
   
-  const csvMapping = {
-    amazon: 0,        // Amazon price (represents Amazon as a seller)
-    fba: 16,          // FBA price (lowest FBA offer)
-    fbm: 18,          // FBM price (lowest FBM offer)
-  };
-  
-  Object.entries(csvMapping).forEach(([sellerType, csvIndex]) => {
-    const csvArray = product.csv?.[csvIndex];
+  offerIndices.forEach(index => {
+    const csvArray = product.csv?.[index];
     if (csvArray && Array.isArray(csvArray) && csvArray.length > 0) {
-      console.log(`Processing ${sellerType} offers from CSV[${csvIndex}]: ${csvArray.length / 2} data points`);
-      
-      // Parse alternating [timestamp, price] format
-      for (let i = 0; i < csvArray.length - 1; i += 2) {
-        const timestampMinutes = csvArray[i];
-        const rawPrice = csvArray[i + 1];
+      // Check if this looks like offer data (alternating timestamp/price)
+      if (csvArray.length >= 4 && typeof csvArray[0] === 'number' && typeof csvArray[1] === 'number') {
+        offers.push({
+          sellerId: `seller_csv_${index}`,
+          sellerName: `Historical Seller ${index}`,
+          offerCSV: csvArray,
+          condition: 'New',
+          prime: false
+        });
         
-        if (rawPrice !== -1 && rawPrice > 0) {
-          const processedPrice = rawPrice / 100; // Convert from Keepa format
-          
-          if (processedPrice > 0.01 && processedPrice < 50000) {
-            offers.push({
-              timestamp: timestampMinutes,
-              price: processedPrice,
-              seller: sellerType === 'amazon' ? 'Amazon' : sellerType.toUpperCase(),
-              condition: 'New',
-              prime: sellerType === 'fba' || sellerType === 'amazon'
-            });
-          }
-        }
+        console.log(`Found historical offer data in CSV[${index}]: ${csvArray.length / 2} price points`);
       }
     }
   });
   
-  // Sort offers by timestamp
-  offers.sort((a, b) => a.timestamp - b.timestamp);
-  
-  console.log(`Total processed offers: ${offers.length}`);
-  console.log(`Timestamp range: ${offers.length > 0 ? `${new Date(keepaTimeToMs(offers[0].timestamp)).toISOString()} to ${new Date(keepaTimeToMs(offers[offers.length - 1].timestamp)).toISOString()}` : 'No offers'}`);
-  
+  console.log(`Total parsed offers: ${offers.length}`);
   return offers;
 };
 
-// NEW: Live offer validation function with flexible matching
-const validateBuyBoxWithLiveOffers = (
-  buyBoxPrice: number,
+// Find seller ID at a specific timestamp
+const findSellerIdAtTimestamp = (
   timestamp: number,
-  liveOffers: LiveOffer[],
-  dollarTolerance: number = 0.50,
-  percentTolerance: number = 0.10,
+  buyBoxHistory: BuyBoxSellerHistory[],
   timeToleranceMinutes: number = 5
-): { isValid: boolean; matchedOffer?: LiveOffer; reason?: string; availableOffers?: LiveOffer[] } => {
+): string | null => {
   
-  console.log(`=== VALIDATING BUY BOX WITH LIVE OFFERS ===`);
-  console.log(`Timestamp: ${new Date(keepaTimeToMs(timestamp)).toISOString()}`);
-  console.log(`Buy Box Price: $${buyBoxPrice.toFixed(2)}`);
+  // Find the most recent seller ID change before or at the timestamp
+  let matchingSeller: BuyBoxSellerHistory | null = null;
   
-  // Find offers that were active around this timestamp (within tolerance)
-  const timeRangeStart = timestamp - timeToleranceMinutes;
-  const timeRangeEnd = timestamp + timeToleranceMinutes;
-  
-  const availableOffers = liveOffers.filter(offer => 
-    offer.timestamp >= timeRangeStart && offer.timestamp <= timeRangeEnd
-  );
-  
-  console.log(`Found ${availableOffers.length} offers active within ±${timeToleranceMinutes} minutes:`);
-  availableOffers.forEach((offer, i) => {
-    const timeDiff = Math.abs(offer.timestamp - timestamp);
-    console.log(`  ${i + 1}. ${offer.seller}: $${offer.price.toFixed(2)} (${timeDiff} min${timeDiff !== 1 ? 's' : ''} away)`);
-  });
-  
-  if (availableOffers.length === 0) {
-    console.log(`❌ REJECTED: No offers found within time tolerance`);
-    return { 
-      isValid: false, 
-      reason: `No offers active within ±${timeToleranceMinutes} minutes`,
-      availableOffers: []
-    };
-  }
-  
-  // Check if Buy Box price matches any available offer within tolerance
-  for (const offer of availableOffers) {
-    const dollarDiff = Math.abs(buyBoxPrice - offer.price);
-    const percentDiff = Math.abs(buyBoxPrice - offer.price) / offer.price;
+  for (let i = buyBoxHistory.length - 1; i >= 0; i--) {
+    const entry = buyBoxHistory[i];
     
-    const withinDollarTolerance = dollarDiff <= dollarTolerance;
-    const withinPercentTolerance = percentDiff <= percentTolerance;
-    
-    console.log(`  ${offer.seller}: Dollar diff $${dollarDiff.toFixed(2)} (≤$${dollarTolerance}? ${withinDollarTolerance}), Percent diff ${(percentDiff * 100).toFixed(1)}% (≤${(percentTolerance * 100).toFixed(1)}%? ${withinPercentTolerance})`);
-    
-    if (withinDollarTolerance || withinPercentTolerance) {
-      console.log(`✅ ACCEPTED: Buy Box price matches ${offer.seller} offer`);
-      return { 
-        isValid: true, 
-        matchedOffer: offer
-      };
+    // If this entry is before or exactly at our timestamp
+    if (entry.timestamp <= timestamp + timeToleranceMinutes) {
+      matchingSeller = entry;
+      break;
     }
   }
   
-  console.log(`❌ REJECTED: Buy Box price $${buyBoxPrice.toFixed(2)} doesn't match any available offers within tolerance`);
-  const closestOffer = availableOffers.reduce((closest, offer) => {
-    const currentDiff = Math.abs(buyBoxPrice - offer.price);
-    const closestDiff = Math.abs(buyBoxPrice - closest.price);
-    return currentDiff < closestDiff ? offer : closest;
-  }, availableOffers[0]);
+  if (!matchingSeller) {
+    // If no entry found before timestamp, check if there's one shortly after
+    const futureEntry = buyBoxHistory.find(entry => 
+      entry.timestamp > timestamp && entry.timestamp <= timestamp + timeToleranceMinutes
+    );
+    
+    if (futureEntry) {
+      matchingSeller = futureEntry;
+    }
+  }
   
-  return { 
-    isValid: false, 
-    reason: `No offer match within tolerance (closest: ${closestOffer.seller} $${closestOffer.price.toFixed(2)}, diff: $${Math.abs(buyBoxPrice - closestOffer.price).toFixed(2)})`,
-    availableOffers
-  };
+  return matchingSeller ? matchingSeller.sellerId : null;
+};
+
+// Find seller's price at a specific timestamp
+const findSellerPriceAtTimestamp = (
+  timestamp: number,
+  sellerId: string,
+  sellerOffers: SellerOffer[],
+  timeToleranceMinutes: number = 5
+): number | null => {
+  
+  // Find the seller's offer data
+  const sellerOffer = sellerOffers.find(offer => offer.sellerId === sellerId);
+  if (!sellerOffer || !sellerOffer.offerCSV || sellerOffer.offerCSV.length < 2) {
+    return null;
+  }
+  
+  let closestPrice: number | null = null;
+  let closestTimeDiff = Infinity;
+  
+  // Parse the seller's price history
+  for (let i = 0; i < sellerOffer.offerCSV.length - 1; i += 2) {
+    const priceTimestamp = sellerOffer.offerCSV[i];
+    const rawPrice = sellerOffer.offerCSV[i + 1];
+    
+    if (rawPrice !== -1 && rawPrice > 0) {
+      const timeDiff = Math.abs(priceTimestamp - timestamp);
+      
+      if (timeDiff <= timeToleranceMinutes && timeDiff < closestTimeDiff) {
+        closestPrice = rawPrice / 100; // Convert from Keepa format
+        closestTimeDiff = timeDiff;
+      }
+    }
+  }
+  
+  return closestPrice;
+};
+
+// Enhanced Buy Box validation with seller ID history
+const validateBuyBoxWithSellerHistory = (
+  buyBoxPrice: number,
+  timestamp: number,
+  buyBoxHistory: BuyBoxSellerHistory[],
+  sellerOffers: SellerOffer[],
+  dollarTolerance: number = 0.50,
+  percentTolerance: number = 0.10,
+  timeToleranceMinutes: number = 5
+): { 
+  isValid: boolean; 
+  sellerId?: string; 
+  sellerPrice?: number; 
+  reason?: string;
+  priceDifference?: number;
+} => {
+  
+  console.log(`=== VALIDATING BUY BOX WITH SELLER HISTORY ===`);
+  console.log(`Timestamp: ${new Date(keepaTimeToMs(timestamp)).toISOString()}`);
+  console.log(`Buy Box Price: $${buyBoxPrice.toFixed(2)}`);
+  
+  // Step 1: Find which seller had the Buy Box at this timestamp
+  const sellerId = findSellerIdAtTimestamp(timestamp, buyBoxHistory, timeToleranceMinutes);
+  
+  if (!sellerId) {
+    console.log(`❌ REJECTED: No seller ID found for timestamp`);
+    return { 
+      isValid: false, 
+      reason: 'No seller ID found in Buy Box history'
+    };
+  }
+  
+  console.log(`Found seller ID: ${sellerId}`);
+  
+  // Step 2: Find that seller's price at this timestamp
+  const sellerPrice = findSellerPriceAtTimestamp(timestamp, sellerId, sellerOffers, timeToleranceMinutes);
+  
+  if (sellerPrice === null) {
+    console.log(`❌ REJECTED: No price found for seller ${sellerId} at timestamp`);
+    return { 
+      isValid: false,
+      sellerId,
+      reason: `No price found for seller ${sellerId}`
+    };
+  }
+  
+  console.log(`Seller ${sellerId} price at timestamp: $${sellerPrice.toFixed(2)}`);
+  
+  // Step 3: Compare prices within tolerance
+  const dollarDiff = Math.abs(buyBoxPrice - sellerPrice);
+  const percentDiff = Math.abs(buyBoxPrice - sellerPrice) / sellerPrice;
+  
+  const withinDollarTolerance = dollarDiff <= dollarTolerance;
+  const withinPercentTolerance = percentDiff <= percentTolerance;
+  
+  console.log(`Dollar diff: $${dollarDiff.toFixed(2)} (≤$${dollarTolerance}? ${withinDollarTolerance})`);
+  console.log(`Percent diff: ${(percentDiff * 100).toFixed(1)}% (≤${(percentTolerance * 100).toFixed(1)}%? ${withinPercentTolerance})`);
+  
+  if (withinDollarTolerance || withinPercentTolerance) {
+    console.log(`✅ ACCEPTED: Buy Box price matches seller ${sellerId} price`);
+    return { 
+      isValid: true,
+      sellerId,
+      sellerPrice,
+      priceDifference: dollarDiff
+    };
+  } else {
+    console.log(`❌ REJECTED: Buy Box price doesn't match seller ${sellerId} price within tolerance`);
+    return { 
+      isValid: false,
+      sellerId,
+      sellerPrice,
+      priceDifference: dollarDiff,
+      reason: `Price mismatch: Buy Box $${buyBoxPrice.toFixed(2)} vs Seller $${sellerPrice.toFixed(2)} (diff: $${dollarDiff.toFixed(2)})`
+    };
+  }
 };
 
 // Enhanced CSV parsing (keep existing code)
@@ -326,8 +441,8 @@ const parseCsvSeries = (csvArray: number[], seriesType: string): { series: Parse
   return { series, stats };
 };
 
-// Enhanced merge function with live offer validation
-const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, offerCountSeries: ParsedSeries, liveOffers: LiveOffer[]): { data: ChartDataPoint[]; stats: DataQualityStats } => {
+// Enhanced merge function with seller history validation
+const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, offerCountSeries: ParsedSeries, buyBoxHistory: BuyBoxSellerHistory[], sellerOffers: SellerOffer[]): { data: ChartDataPoint[]; stats: DataQualityStats } => {
   const allTimestamps = new Set<number>();
   
   Object.values(seriesData).forEach(series => {
@@ -348,11 +463,12 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     filteredPoints: 0,
     buyBoxValidationStats: {
       rawBuyBoxPoints: 0,
-      liveOfferRejected: 0,
-      basicValidationRejected: 0,
+      sellerIdNotFound: 0,
+      sellerOfferNotFound: 0,
+      priceNotFound: 0,
+      priceMismatch: 0,
       finalValidPoints: 0,
-      rejectedExamples: [],
-      acceptedExamples: []
+      validationExamples: []
     },
     seriesStats: {}
   };
@@ -362,9 +478,10 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     stats.seriesStats[key] = { rawCount: 0, validCount: 0, filteredCount: 0, filterReasons: [] };
   });
   
-  console.log(`=== MERGING DATA WITH LIVE OFFER VALIDATION ===`);
+  console.log(`=== MERGING DATA WITH SELLER HISTORY VALIDATION ===`);
   console.log(`Processing ${sortedTimestamps.length} timestamps`);
-  console.log(`Available live offers: ${liveOffers.length}`);
+  console.log(`Available Buy Box seller history: ${buyBoxHistory.length} entries`);
+  console.log(`Available seller offers: ${sellerOffers.length}`);
   
   // Create merged data points with enhanced Buy Box validation
   const dataPoints: ChartDataPoint[] = sortedTimestamps.map(keepaTimestamp => {
@@ -381,57 +498,63 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     const rating = seriesData.rating?.[keepaTimestamp];
     const reviewCount = seriesData.reviewCount?.[keepaTimestamp];
     
-    // Enhanced Buy Box validation with live offers
+    // Enhanced Buy Box validation with seller history
     let validatedBuyBoxPrice: number | undefined = undefined;
     if (rawBuyBoxPrice !== undefined) {
       stats.buyBoxValidationStats.rawBuyBoxPoints++;
       
-      // Step 1: Live offer validation
-      const offerResult = validateBuyBoxWithLiveOffers(
+      // Validate using seller history
+      const validationResult = validateBuyBoxWithSellerHistory(
         rawBuyBoxPrice,
         keepaTimestamp,
-        liveOffers
+        buyBoxHistory,
+        sellerOffers
       );
       
-      if (!offerResult.isValid) {
-        stats.buyBoxValidationStats.liveOfferRejected++;
+      if (validationResult.isValid) {
+        validatedBuyBoxPrice = rawBuyBoxPrice;
+        stats.buyBoxValidationStats.finalValidPoints++;
+        stats.seriesStats.buyBox.validCount++;
+        stats.validPoints++;
         
-        // Store first 5 rejected examples for debugging
-        if (stats.buyBoxValidationStats.rejectedExamples.length < 5) {
-          stats.buyBoxValidationStats.rejectedExamples.push({
+        // Store validation example
+        if (stats.buyBoxValidationStats.validationExamples.length < 10) {
+          stats.buyBoxValidationStats.validationExamples.push({
             timestamp: keepaTimestamp,
             buyBoxPrice: rawBuyBoxPrice,
-            availableOffers: offerResult.availableOffers || [],
-            reason: offerResult.reason || 'No live offer match'
+            sellerId: validationResult.sellerId || 'unknown',
+            sellerPrice: validationResult.sellerPrice || 0,
+            priceDifference: validationResult.priceDifference || 0,
+            status: 'valid'
           });
         }
         
-        stats.seriesStats.buyBox.filteredCount++;
-        stats.seriesStats.buyBox.filterReasons.push(`Live offer validation failed: ${offerResult.reason}`);
+        console.log(`✅ Buy Box ACCEPTED: $${rawBuyBoxPrice.toFixed(2)} at ${date.toISOString()} (seller ${validationResult.sellerId})`);
       } else {
-        // Step 2: Basic price validation (existing logic)
-        if (isValidPrice(rawBuyBoxPrice)) {
-          validatedBuyBoxPrice = rawBuyBoxPrice;
-          stats.buyBoxValidationStats.finalValidPoints++;
-          stats.seriesStats.buyBox.validCount++;
-          stats.validPoints++;
-          
-          // Store first 5 accepted examples for debugging
-          if (stats.buyBoxValidationStats.acceptedExamples.length < 5 && offerResult.matchedOffer) {
-            stats.buyBoxValidationStats.acceptedExamples.push({
-              timestamp: keepaTimestamp,
-              buyBoxPrice: rawBuyBoxPrice,
-              matchedOffer: offerResult.matchedOffer,
-              priceDifference: Math.abs(rawBuyBoxPrice - offerResult.matchedOffer.price)
-            });
-          }
-          
-          console.log(`✅ Buy Box ACCEPTED: $${rawBuyBoxPrice.toFixed(2)} at ${date.toISOString()} (matched ${offerResult.matchedOffer?.seller})`);
+        // Categorize rejection reason
+        if (validationResult.reason?.includes('No seller ID')) {
+          stats.buyBoxValidationStats.sellerIdNotFound++;
+        } else if (validationResult.reason?.includes('No price found')) {
+          stats.buyBoxValidationStats.priceNotFound++;
         } else {
-          stats.buyBoxValidationStats.basicValidationRejected++;
-          stats.seriesStats.buyBox.filteredCount++;
-          stats.seriesStats.buyBox.filterReasons.push(`Basic validation failed: $${rawBuyBoxPrice}`);
-          stats.filteredPoints++;
+          stats.buyBoxValidationStats.priceMismatch++;
+        }
+        
+        stats.seriesStats.buyBox.filteredCount++;
+        stats.seriesStats.buyBox.filterReasons.push(validationResult.reason || 'Unknown validation failure');
+        stats.filteredPoints++;
+        
+        // Store rejection example
+        if (stats.buyBoxValidationStats.validationExamples.length < 10) {
+          stats.buyBoxValidationStats.validationExamples.push({
+            timestamp: keepaTimestamp,
+            buyBoxPrice: rawBuyBoxPrice,
+            sellerId: validationResult.sellerId || 'unknown',
+            sellerPrice: validationResult.sellerPrice || 0,
+            priceDifference: validationResult.priceDifference || 0,
+            status: 'rejected',
+            reason: validationResult.reason
+          });
         }
       }
     }
@@ -453,31 +576,23 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     return validatedData;
   });
   
-  console.log('=== LIVE OFFER VALIDATION RESULTS ===');
+  console.log('=== SELLER HISTORY VALIDATION RESULTS ===');
   console.log(`Raw Buy Box Points: ${stats.buyBoxValidationStats.rawBuyBoxPoints}`);
-  console.log(`Live Offer Rejected: ${stats.buyBoxValidationStats.liveOfferRejected}`);
-  console.log(`Basic Validation Rejected: ${stats.buyBoxValidationStats.basicValidationRejected}`);
+  console.log(`Seller ID Not Found: ${stats.buyBoxValidationStats.sellerIdNotFound}`);
+  console.log(`Price Not Found: ${stats.buyBoxValidationStats.priceNotFound}`);
+  console.log(`Price Mismatch: ${stats.buyBoxValidationStats.priceMismatch}`);
   console.log(`Final Valid Points: ${stats.buyBoxValidationStats.finalValidPoints}`);
   console.log(`Success Rate: ${stats.buyBoxValidationStats.rawBuyBoxPoints ? Math.round((stats.buyBoxValidationStats.finalValidPoints / stats.buyBoxValidationStats.rawBuyBoxPoints) * 100) : 0}%`);
   
-  if (stats.buyBoxValidationStats.rejectedExamples.length > 0) {
-    console.log('=== REJECTED BUY BOX EXAMPLES ===');
-    stats.buyBoxValidationStats.rejectedExamples.forEach((example, index) => {
+  if (stats.buyBoxValidationStats.validationExamples.length > 0) {
+    console.log('=== VALIDATION EXAMPLES ===');
+    stats.buyBoxValidationStats.validationExamples.forEach((example, index) => {
       const date = new Date(keepaTimeToMs(example.timestamp)).toISOString();
-      console.log(`${index + 1}. ${date}: Buy Box $${example.buyBoxPrice.toFixed(2)}`);
-      console.log(`   Available offers: ${example.availableOffers.length}`);
-      example.availableOffers.forEach(offer => {
-        console.log(`     ${offer.seller}: $${offer.price.toFixed(2)}`);
-      });
-      console.log(`   Reason: ${example.reason}`);
-    });
-  }
-  
-  if (stats.buyBoxValidationStats.acceptedExamples.length > 0) {
-    console.log('=== ACCEPTED BUY BOX EXAMPLES ===');
-    stats.buyBoxValidationStats.acceptedExamples.forEach((example, index) => {
-      const date = new Date(keepaTimeToMs(example.timestamp)).toISOString();
-      console.log(`${index + 1}. ${date}: Buy Box $${example.buyBoxPrice.toFixed(2)} matched ${example.matchedOffer.seller} $${example.matchedOffer.price.toFixed(2)} (diff: $${example.priceDifference.toFixed(2)})`);
+      console.log(`${index + 1}. ${date}: ${example.status.toUpperCase()}`);
+      console.log(`   Buy Box: $${example.buyBoxPrice.toFixed(2)}, Seller ${example.sellerId}: $${example.sellerPrice.toFixed(2)} (diff: $${example.priceDifference.toFixed(2)})`);
+      if (example.reason) {
+        console.log(`   Reason: ${example.reason}`);
+      }
     });
   }
   
@@ -565,9 +680,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with enhanced live offer validation
+  // Parse Keepa CSV data with enhanced seller history validation
   const { chartData, dataStats } = useMemo(() => {
-    console.log('=== PROCESSING CHART DATA WITH LIVE OFFER VALIDATION ===');
+    console.log('=== PROCESSING CHART DATA WITH SELLER HISTORY VALIDATION ===');
     console.log('Product ASIN:', product.asin);
     console.log('Product CSV structure:', Object.keys(product.csv || {}));
     
@@ -576,8 +691,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: null };
     }
 
-    // Parse live offers data first
-    const liveOffers = parseOffersData(product);
+    // Parse Buy Box seller history and seller offers
+    const buyBoxHistory = parseBuyBoxSellerHistory(product);
+    const sellerOffers = parseSellerOffers(product);
 
     // Parse each CSV series separately
     const seriesData: { [key: string]: ParsedSeries } = {};
@@ -615,9 +731,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: null };
     }
     
-    // Merge all series by timestamp with live offer validation
-    console.log('=== MERGING SERIES DATA WITH LIVE OFFER VALIDATION ===');
-    const { data: mergedData, stats } = mergeSeriesByTimestamp(seriesData, offerCountSeries, liveOffers);
+    // Merge all series by timestamp with seller history validation
+    console.log('=== MERGING SERIES DATA WITH SELLER HISTORY VALIDATION ===');
+    const { data: mergedData, stats } = mergeSeriesByTimestamp(seriesData, offerCountSeries, buyBoxHistory, sellerOffers);
     
     if (mergedData.length === 0) {
       console.log('ERROR: No merged data points created');
@@ -627,7 +743,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     // Sort data chronologically
     let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
     
-    console.log('=== FINAL RESULTS WITH LIVE OFFER VALIDATION ===');
+    console.log('=== FINAL RESULTS WITH SELLER HISTORY VALIDATION ===');
     console.log('Total processed data points:', filteredData.length);
     console.log('Valid Buy Box data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
     console.log('Date range:', {
@@ -701,7 +817,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     
     return (
       <Badge variant="secondary" className={qualityColor}>
-        Buy Box: {Math.round(buyBoxSuccessRate * 100)}% Live-Validated
+        Buy Box: {Math.round(buyBoxSuccessRate * 100)}% Seller-Validated
       </Badge>
     );
   };
@@ -725,9 +841,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               </p>
               {dataStats?.buyBoxValidationStats && (
                 <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  <div>Buy Box Live Offer Validation Results:</div>
+                  <div>Buy Box Seller History Validation Results:</div>
                   <div>Raw Points: {dataStats.buyBoxValidationStats.rawBuyBoxPoints}</div>
-                  <div>Live Offer Rejected: {dataStats.buyBoxValidationStats.liveOfferRejected}</div>
+                  <div>Seller ID Not Found: {dataStats.buyBoxValidationStats.sellerIdNotFound}</div>
                   <div>Valid Points: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
                 </div>
               )}
@@ -757,7 +873,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
             <CardTitle className="flex items-center gap-2">
               {title}
               <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                Live-Offer Validated Data ({filteredData.length} points)
+                Seller-History Validated Data ({filteredData.length} points)
               </Badge>
               {getDataQualityBadge()}
             </CardTitle>
@@ -823,39 +939,34 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       </CardHeader>
       
       <CardContent>
-        {/* Enhanced Data Quality Statistics with Live Offer Validation Results */}
+        {/* Enhanced Data Quality Statistics with Seller History Validation Results */}
         {showDataStats && dataStats && (
           <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
-            <h4 className="text-sm font-semibold mb-2">Buy Box Live Offer Validation Results</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
+            <h4 className="text-sm font-semibold mb-2">Buy Box Seller History Validation Results</h4>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs mb-3">
               <div>Raw Buy Box: {dataStats.buyBoxValidationStats.rawBuyBoxPoints}</div>
-              <div>Live Offer Rejected: {dataStats.buyBoxValidationStats.liveOfferRejected}</div>
-              <div>Basic Rejected: {dataStats.buyBoxValidationStats.basicValidationRejected}</div>
+              <div>Seller ID Missing: {dataStats.buyBoxValidationStats.sellerIdNotFound}</div>
+              <div>Price Missing: {dataStats.buyBoxValidationStats.priceNotFound}</div>
+              <div>Price Mismatch: {dataStats.buyBoxValidationStats.priceMismatch}</div>
               <div>Final Valid: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
               <div className="bg-white dark:bg-slate-800 p-2 rounded">
-                <div className="font-medium text-blue-600">Live Offer Validation Success</div>
+                <div className="font-medium text-blue-600">Seller History Validation</div>
                 <div>
                   {dataStats.buyBoxValidationStats.rawBuyBoxPoints > 0 
                     ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.rawBuyBoxPoints) * 100)
-                    : 0}% of raw Buy Box prices matched live offers
+                    : 0}% of Buy Box prices matched seller history
                 </div>
                 <div className="text-green-600">
-                  {dataStats.buyBoxValidationStats.liveOfferRejected} phantom prices eliminated
+                  {dataStats.buyBoxValidationStats.sellerIdNotFound + dataStats.buyBoxValidationStats.priceNotFound + dataStats.buyBoxValidationStats.priceMismatch} phantom prices eliminated
                 </div>
               </div>
               <div className="bg-white dark:bg-slate-800 p-2 rounded">
-                <div className="font-medium text-purple-600">Data Quality Impact</div>
-                <div>
-                  Before: {dataStats.buyBoxValidationStats.rawBuyBoxPoints} Buy Box points
-                </div>
-                <div>
-                  After: {dataStats.buyBoxValidationStats.finalValidPoints} validated points
-                </div>
-                <div className="text-red-600">
-                  Removed {dataStats.buyBoxValidationStats.liveOfferRejected} unmatched prices
-                </div>
+                <div className="font-medium text-purple-600">Precision Breakdown</div>
+                <div>Seller ID Found: {dataStats.buyBoxValidationStats.rawBuyBoxPoints - dataStats.buyBoxValidationStats.sellerIdNotFound}</div>
+                <div>Price Found: {dataStats.buyBoxValidationStats.rawBuyBoxPoints - dataStats.buyBoxValidationStats.sellerIdNotFound - dataStats.buyBoxValidationStats.priceNotFound}</div>
+                <div className="text-green-600">Price Match: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
               </div>
             </div>
           </div>
@@ -910,7 +1021,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   <Label htmlFor="buybox-price" className="text-xs">
                     <span className="inline-block w-3 h-3 rounded-full mr-1" 
                           style={{ backgroundColor: COLOR_SCHEME.buyBoxPrice }}></span>
-                    Buy Box (Live-Validated)
+                    Buy Box (Seller-Validated)
                   </Label>
                 </div>
               </>
@@ -1044,7 +1155,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       dataKey="buyBoxPrice" 
                       stroke={COLOR_SCHEME.buyBoxPrice}
                       strokeWidth={2}
-                      name="Buy Box Price (Live-Validated)"
+                      name="Buy Box Price (Seller-Validated)"
                       dot={false}
                       connectNulls={fillGaps}
                     />
@@ -1113,18 +1224,18 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         
         {/* Enhanced Chart Info */}
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} data points ({granularity} granularity) with live offer validation
+          Showing {filteredData.length} data points ({granularity} granularity) with seller history validation
           {dataStats?.buyBoxValidationStats && (
             <>
               <br />
               <span className="text-green-600">
-                Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} live-validated points 
-                ({dataStats.buyBoxValidationStats.liveOfferRejected} phantom prices filtered out)
+                Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} seller-validated points 
+                ({dataStats.buyBoxValidationStats.sellerIdNotFound + dataStats.buyBoxValidationStats.priceNotFound + dataStats.buyBoxValidationStats.priceMismatch} phantom prices filtered out)
               </span>
               <br />
               <span>Success Rate: {dataStats.buyBoxValidationStats.rawBuyBoxPoints > 0 
                 ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.rawBuyBoxPoints) * 100) 
-                : 0}% of raw Buy Box data validated against live offers</span>
+                : 0}% of raw Buy Box data validated against seller history</span>
             </>
           )}
           <br />
