@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -41,6 +42,12 @@ export interface AmazonProduct {
     convertedAsin: string;
   };
   csv?: any[];
+  offers?: Array<{
+    price: number;
+    seller: string;
+    condition: string;
+    prime: boolean;
+  }>;
 }
 
 export const useAmazonProduct = () => {

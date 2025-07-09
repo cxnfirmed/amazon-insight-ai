@@ -1007,7 +1007,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                 <>
                   {lineVisibility.amazonPrice && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="amazonPrice" 
                       stroke={COLOR_SCHEME.amazonPrice}
                       strokeWidth={2}
@@ -1018,7 +1018,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   )}
                   {lineVisibility.fbaPrice && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="fbaPrice" 
                       stroke={COLOR_SCHEME.fbaPrice}
                       strokeWidth={2}
@@ -1029,7 +1029,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   )}
                   {lineVisibility.fbmPrice && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="fbmPrice" 
                       stroke={COLOR_SCHEME.fbmPrice}
                       strokeWidth={2}
@@ -1040,7 +1040,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   )}
                   {lineVisibility.buyBoxPrice && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="buyBoxPrice" 
                       stroke={COLOR_SCHEME.buyBoxPrice}
                       strokeWidth={2}
@@ -1057,7 +1057,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                 <>
                   {lineVisibility.salesRank && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="salesRank" 
                       stroke={COLOR_SCHEME.salesRank}
                       strokeWidth={2}
@@ -1068,7 +1068,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   )}
                   {lineVisibility.offerCount && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="offerCount" 
                       stroke={COLOR_SCHEME.offerCount}
                       strokeWidth={2}
@@ -1085,7 +1085,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                 <>
                   {lineVisibility.reviewCount && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="reviewCount" 
                       stroke={COLOR_SCHEME.reviewCount}
                       strokeWidth={2}
@@ -1096,7 +1096,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   )}
                   {lineVisibility.rating && (
                     <Line 
-                      type="monotone" 
+                      type="stepAfter" 
                       dataKey="rating" 
                       stroke={COLOR_SCHEME.rating}
                       strokeWidth={2}
