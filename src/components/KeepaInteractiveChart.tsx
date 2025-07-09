@@ -47,6 +47,20 @@ interface DataQualityStats {
   totalRawPoints: number;
   validPoints: number;
   filteredPoints: number;
+  buyBoxValidationStats: {
+    rawBuyBoxPoints: number;
+    sellerCorrelationRejected: number;
+    basicValidationRejected: number;
+    finalValidPoints: number;
+    rejectedExamples: Array<{
+      timestamp: number;
+      buyBoxPrice: number;
+      amazonPrice?: number;
+      fbaPrice?: number;
+      fbmPrice?: number;
+      reason: string;
+    }>;
+  };
   seriesStats: {
     [key: string]: {
       rawCount: number;
@@ -87,41 +101,67 @@ const COLOR_SCHEME = {
 // Keepa epoch: January 1, 2011 00:00:00 UTC
 const KEEPA_EPOCH = new Date('2011-01-01T00:00:00.000Z').getTime();
 
-// Enhanced price validation functions with improved Buy Box logic
+// Enhanced price validation functions
 const isValidPrice = (price: number): boolean => {
   return typeof price === 'number' && price > 0.01 && price < 10000;
 };
 
-// Updated Buy Box validation - now allows missing offer count
-const isValidBuyBoxPrice = (price: number, offerCount?: number, recentMedian?: number): boolean => {
-  console.log(`Validating Buy Box price: $${price}, offerCount: ${offerCount}, median: ${recentMedian}`);
+// NEW: Seller correlation validation function
+const validateBuyBoxWithSellerCorrelation = (
+  buyBoxPrice: number,
+  amazonPrice?: number,
+  fbaPrice?: number,
+  fbmPrice?: number,
+  timestamp?: number,
+  tolerance: number = 0.20
+): { isValid: boolean; matchedSeller?: string; reason?: string } => {
   
-  if (!isValidPrice(price)) {
-    console.log(`Buy Box price $${price} failed basic price validation`);
-    return false;
+  console.log(`=== VALIDATING BUY BOX PRICE ===`);
+  console.log(`Timestamp: ${timestamp ? new Date(keepaTimeToMs(timestamp)).toISOString() : 'unknown'}`);
+  console.log(`Buy Box Price: $${buyBoxPrice.toFixed(2)}`);
+  console.log(`Available Sellers:`);
+  console.log(`  Amazon: ${amazonPrice ? `$${amazonPrice.toFixed(2)}` : 'N/A'}`);
+  console.log(`  FBA: ${fbaPrice ? `$${fbaPrice.toFixed(2)}` : 'N/A'}`);
+  console.log(`  FBM: ${fbmPrice ? `$${fbmPrice.toFixed(2)}` : 'N/A'}`);
+  
+  const sellers = [
+    { name: 'Amazon', price: amazonPrice },
+    { name: 'FBA', price: fbaPrice },
+    { name: 'FBM', price: fbmPrice }
+  ].filter(seller => seller.price !== undefined && seller.price > 0);
+  
+  if (sellers.length === 0) {
+    console.log(`❌ REJECTED: No valid seller prices available`);
+    return { 
+      isValid: false, 
+      reason: 'No seller prices available for correlation' 
+    };
   }
   
-  // Only filter out if offer count is explicitly 0 (not missing/undefined)
-  if (typeof offerCount === 'number' && offerCount <= 0) {
-    console.log(`Buy Box price $${price} filtered - offer count is ${offerCount}`);
-    return false;
-  }
-  
-  // If we have recent median data and offer count, check for extreme spikes
-  if (recentMedian && recentMedian > 0 && typeof offerCount === 'number') {
-    const spikeThreshold = 2.5;
-    if (price > recentMedian * spikeThreshold && offerCount < 2) {
-      console.log(`Buy Box spike filtered: $${price.toFixed(2)} vs median $${recentMedian.toFixed(2)}, offers: ${offerCount}`);
-      return false;
+  // Check if Buy Box price matches any seller price within tolerance
+  for (const seller of sellers) {
+    const priceDiff = Math.abs(buyBoxPrice - seller.price!);
+    const withinTolerance = priceDiff <= tolerance;
+    
+    console.log(`  ${seller.name}: Diff $${priceDiff.toFixed(2)} (tolerance: $${tolerance.toFixed(2)}) - ${withinTolerance ? '✅ MATCH' : '❌'}`);
+    
+    if (withinTolerance) {
+      console.log(`✅ ACCEPTED: Buy Box price matches ${seller.name} seller`);
+      return { 
+        isValid: true, 
+        matchedSeller: seller.name 
+      };
     }
   }
   
-  console.log(`Buy Box price $${price} validated successfully`);
-  return true;
+  console.log(`❌ REJECTED: Buy Box price $${buyBoxPrice.toFixed(2)} doesn't match any seller within $${tolerance.toFixed(2)} tolerance`);
+  return { 
+    isValid: false, 
+    reason: `No seller match within $${tolerance.toFixed(2)} tolerance (closest: ${sellers.map(s => `${s.name}: $${s.price!.toFixed(2)}`).join(', ')})` 
+  };
 };
 
 const isValidFbaFbmPrice = (price: number): boolean => {
-  // More relaxed validation for FBA/FBM to preserve sparse data
   return typeof price === 'number' && price > 0.01 && price < 50000;
 };
 
@@ -142,7 +182,19 @@ const parseCsvSeries = (csvArray: number[], seriesType: string): { series: Parse
   
   stats.rawCount = Math.floor(csvArray.length / 2);
   console.log(`${seriesType}: Processing ${stats.rawCount} raw data points`);
-  console.log(`${seriesType}: Sample raw data:`, csvArray.slice(0, 10));
+  
+  // Show raw data sample for Buy Box specifically
+  if (seriesType === 'buyBox') {
+    console.log(`=== RAW BUY BOX CSV DATA SAMPLE ===`);
+    const sampleSize = Math.min(20, csvArray.length);
+    for (let i = 0; i < sampleSize - 1; i += 2) {
+      const timestamp = csvArray[i];
+      const rawValue = csvArray[i + 1];
+      const processedValue = rawValue === -1 ? -1 : rawValue / 100;
+      const date = new Date(keepaTimeToMs(timestamp)).toISOString();
+      console.log(`  [${i/2}] ${date}: Raw=${rawValue}, Processed=$${processedValue === -1 ? 'N/A' : processedValue.toFixed(2)}`);
+    }
+  }
   
   // Parse alternating [timestamp, value, timestamp, value, ...] format
   for (let i = 0; i < csvArray.length - 1; i += 2) {
@@ -197,60 +249,7 @@ const parseCsvSeries = (csvArray: number[], seriesType: string): { series: Parse
   return { series, stats };
 };
 
-// Enhanced median calculation for price spike detection
-const calculateMedian = (values: number[]): number => {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-};
-
-// Enhanced price spike filtering with median-based detection
-const filterPriceSpikes = (data: ChartDataPoint[], field: keyof ChartDataPoint): ChartDataPoint[] => {
-  if (data.length < 5) return data;
-  
-  // Calculate recent median for context
-  const recentValues = data.slice(-20).map(point => point[field] as number).filter(v => v && !isNaN(v));
-  const recentMedian = calculateMedian(recentValues);
-  
-  return data.map((point, index) => {
-    const value = point[field] as number;
-    if (!value || isNaN(value)) return point;
-    
-    // Different spike detection logic for different fields
-    if (field === 'buyBoxPrice') {
-      // For Buy Box, use offer count context
-      const offerCount = point.offerCount || 0;
-      if (!isValidBuyBoxPrice(value, offerCount, recentMedian)) {
-        console.log(`Filtering Buy Box spike at ${point.formattedDate}: $${value.toFixed(2)}, offers: ${offerCount}`);
-        return { ...point, [field]: undefined };
-      }
-    } else if (['amazonPrice', 'fbaPrice', 'fbmPrice'].includes(field as string)) {
-      // For other prices, use contextual spike detection
-      const prevPoint = index > 0 ? data[index - 1] : null;
-      const nextPoint = index < data.length - 1 ? data[index + 1] : null;
-      
-      const prevValue = prevPoint?.[field] as number;
-      const nextValue = nextPoint?.[field] as number;
-      
-      // If current value is 5x+ different from both neighbors and median, it's likely a spike
-      if (prevValue && nextValue && recentMedian > 0) {
-        const avgNeighbor = (prevValue + nextValue) / 2;
-        const spikeThreshold = 5;
-        
-        if ((value > avgNeighbor * spikeThreshold || value < avgNeighbor / spikeThreshold) &&
-            (value > recentMedian * spikeThreshold || value < recentMedian / spikeThreshold)) {
-          console.log(`Filtering ${field} spike at ${point.formattedDate}: $${value.toFixed(2)} vs median $${recentMedian.toFixed(2)}`);
-          return { ...point, [field]: undefined };
-        }
-      }
-    }
-    
-    return point;
-  });
-};
-
-// Enhanced merge function with improved Buy Box handling
+// Enhanced merge function with seller correlation validation
 const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, offerCountSeries: ParsedSeries): { data: ChartDataPoint[]; stats: DataQualityStats } => {
   // Collect all unique timestamps
   const allTimestamps = new Set<number>();
@@ -273,6 +272,13 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     totalRawPoints: sortedTimestamps.length,
     validPoints: 0,
     filteredPoints: 0,
+    buyBoxValidationStats: {
+      rawBuyBoxPoints: 0,
+      sellerCorrelationRejected: 0,
+      basicValidationRejected: 0,
+      finalValidPoints: 0,
+      rejectedExamples: []
+    },
     seriesStats: {}
   };
   
@@ -281,10 +287,12 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     stats.seriesStats[key] = { rawCount: 0, validCount: 0, filteredCount: 0, filterReasons: [] };
   });
   
-  console.log(`Merging data across ${sortedTimestamps.length} timestamps`);
+  console.log(`=== MERGING DATA WITH SELLER CORRELATION ===`);
+  console.log(`Processing ${sortedTimestamps.length} timestamps`);
+  console.log('Available series:', Object.keys(seriesData));
   console.log('Offer count data points:', Object.keys(offerCountSeries).length);
   
-  // Create merged data points with enhanced validation
+  // Create merged data points with enhanced Buy Box validation
   const dataPoints: ChartDataPoint[] = sortedTimestamps.map(keepaTimestamp => {
     const timestampMs = keepaTimeToMs(keepaTimestamp);
     const date = new Date(timestampMs);
@@ -293,32 +301,62 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     const amazonPrice = seriesData.amazon?.[keepaTimestamp];
     const fbaPrice = seriesData.fba?.[keepaTimestamp];
     const fbmPrice = seriesData.fbm?.[keepaTimestamp];
-    const buyBoxPrice = seriesData.buyBox?.[keepaTimestamp];
+    const rawBuyBoxPrice = seriesData.buyBox?.[keepaTimestamp];
     const salesRank = seriesData.salesRank?.[keepaTimestamp];
     const offerCount = offerCountSeries[keepaTimestamp];
     const rating = seriesData.rating?.[keepaTimestamp];
     const reviewCount = seriesData.reviewCount?.[keepaTimestamp];
     
-    // Enhanced Buy Box validation - no longer requires offer count
+    // Enhanced Buy Box validation with seller correlation
     let validatedBuyBoxPrice: number | undefined = undefined;
-    if (buyBoxPrice !== undefined) {
-      stats.seriesStats.buyBox.rawCount++;
+    if (rawBuyBoxPrice !== undefined) {
+      stats.buyBoxValidationStats.rawBuyBoxPoints++;
       
-      // Calculate recent median for spike detection (optional)
-      const recentMedian = undefined; // Simplified for now
+      // Step 1: Seller correlation validation
+      const correlationResult = validateBuyBoxWithSellerCorrelation(
+        rawBuyBoxPrice,
+        amazonPrice,
+        fbaPrice,
+        fbmPrice,
+        keepaTimestamp
+      );
       
-      if (isValidBuyBoxPrice(buyBoxPrice, offerCount, recentMedian)) {
-        validatedBuyBoxPrice = buyBoxPrice;
-        stats.seriesStats.buyBox.validCount++;
-        stats.validPoints++;
-      } else {
+      if (!correlationResult.isValid) {
+        stats.buyBoxValidationStats.sellerCorrelationRejected++;
+        
+        // Store first 10 rejected examples for debugging
+        if (stats.buyBoxValidationStats.rejectedExamples.length < 10) {
+          stats.buyBoxValidationStats.rejectedExamples.push({
+            timestamp: keepaTimestamp,
+            buyBoxPrice: rawBuyBoxPrice,
+            amazonPrice,
+            fbaPrice,
+            fbmPrice,
+            reason: correlationResult.reason || 'No seller correlation'
+          });
+        }
+        
         stats.seriesStats.buyBox.filteredCount++;
-        stats.seriesStats.buyBox.filterReasons.push(`Filtered Buy Box: $${buyBoxPrice}`);
-        stats.filteredPoints++;
+        stats.seriesStats.buyBox.filterReasons.push(`Seller correlation failed: ${correlationResult.reason}`);
+      } else {
+        // Step 2: Basic price validation (existing logic)
+        if (isValidPrice(rawBuyBoxPrice)) {
+          validatedBuyBoxPrice = rawBuyBoxPrice;
+          stats.buyBoxValidationStats.finalValidPoints++;
+          stats.seriesStats.buyBox.validCount++;
+          stats.validPoints++;
+          
+          console.log(`✅ Buy Box ACCEPTED: $${rawBuyBoxPrice.toFixed(2)} at ${date.toISOString()} (matched ${correlationResult.matchedSeller})`);
+        } else {
+          stats.buyBoxValidationStats.basicValidationRejected++;
+          stats.seriesStats.buyBox.filteredCount++;
+          stats.seriesStats.buyBox.filterReasons.push(`Basic validation failed: $${rawBuyBoxPrice}`);
+          stats.filteredPoints++;
+        }
       }
     }
     
-    // Validate other price fields
+    // Validate other price fields (existing logic)
     const validatedData = {
       timestamp: date.toISOString(),
       timestampMs,
@@ -347,18 +385,27 @@ const mergeSeriesByTimestamp = (seriesData: { [key: string]: ParsedSeries }, off
     return validatedData;
   });
   
-  console.log('Merge results - Data Quality Stats:', {
-    totalPoints: stats.totalRawPoints,
-    validPoints: stats.validPoints,
-    filteredPoints: stats.filteredPoints,
-    buyBoxStats: stats.seriesStats.buyBox,
-    fbaStats: stats.seriesStats.fba
-  });
+  console.log('=== BUY BOX VALIDATION RESULTS ===');
+  console.log(`Raw Buy Box Points: ${stats.buyBoxValidationStats.rawBuyBoxPoints}`);
+  console.log(`Seller Correlation Rejected: ${stats.buyBoxValidationStats.sellerCorrelationRejected}`);
+  console.log(`Basic Validation Rejected: ${stats.buyBoxValidationStats.basicValidationRejected}`);
+  console.log(`Final Valid Points: ${stats.buyBoxValidationStats.finalValidPoints}`);
+  console.log(`Success Rate: ${stats.buyBoxValidationStats.rawBuyBoxPoints ? Math.round((stats.buyBoxValidationStats.finalValidPoints / stats.buyBoxValidationStats.rawBuyBoxPoints) * 100) : 0}%`);
+  
+  if (stats.buyBoxValidationStats.rejectedExamples.length > 0) {
+    console.log('=== FIRST 10 REJECTED BUY BOX EXAMPLES ===');
+    stats.buyBoxValidationStats.rejectedExamples.forEach((example, index) => {
+      const date = new Date(keepaTimeToMs(example.timestamp)).toISOString();
+      console.log(`${index + 1}. ${date}: Buy Box $${example.buyBoxPrice.toFixed(2)}`);
+      console.log(`   Available: Amazon=${example.amazonPrice ? `$${example.amazonPrice.toFixed(2)}` : 'N/A'}, FBA=${example.fbaPrice ? `$${example.fbaPrice.toFixed(2)}` : 'N/A'}, FBM=${example.fbmPrice ? `$${example.fbmPrice.toFixed(2)}` : 'N/A'}`);
+      console.log(`   Reason: ${example.reason}`);
+    });
+  }
   
   return { data: dataPoints, stats };
 };
 
-// Data aggregation functions
+// Data aggregation functions (keep existing code)
 const aggregateData = (data: ChartDataPoint[], granularity: string): ChartDataPoint[] => {
   if (granularity === 'raw' || data.length === 0) return data;
   
@@ -427,7 +474,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   const [granularity, setGranularity] = useState('raw');
   const [chartMode, setChartMode] = useState<'price' | 'sales' | 'reviews'>('price');
   const [fillGaps, setFillGaps] = useState(false);
-  const [showDataStats, setShowDataStats] = useState(true); // Default to true for debugging
+  const [showDataStats, setShowDataStats] = useState(true);
   const [lineVisibility, setLineVisibility] = useState<LineVisibility>({
     amazonPrice: true,
     fbaPrice: true,
@@ -439,9 +486,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with enhanced validation and debugging
+  // Parse Keepa CSV data with enhanced seller correlation validation
   const { chartData, dataStats } = useMemo(() => {
-    console.log('=== PROCESSING CHART DATA ===');
+    console.log('=== PROCESSING CHART DATA WITH SELLER CORRELATION ===');
     console.log('Product ASIN:', product.asin);
     console.log('Product CSV structure:', Object.keys(product.csv || {}));
     
@@ -489,8 +536,8 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: null };
     }
     
-    // Merge all series by timestamp with enhanced validation
-    console.log('=== MERGING SERIES DATA ===');
+    // Merge all series by timestamp with enhanced Buy Box validation
+    console.log('=== MERGING SERIES DATA WITH SELLER CORRELATION ===');
     const { data: mergedData, stats } = mergeSeriesByTimestamp(seriesData, offerCountSeries);
     
     if (mergedData.length === 0) {
@@ -498,26 +545,17 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: stats };
     }
     
-    // Sort and apply price spike filtering (simplified for now)
+    // Sort data chronologically
     let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
     
-    console.log('=== FINAL RESULTS ===');
+    console.log('=== FINAL RESULTS WITH SELLER CORRELATION ===');
     console.log('Total processed data points:', filteredData.length);
-    console.log('Buy Box data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
+    console.log('Valid Buy Box data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
     console.log('FBA data points:', filteredData.filter(d => d.fbaPrice !== undefined).length);
     console.log('Date range:', {
       first: filteredData[0]?.timestamp,
       last: filteredData[filteredData.length - 1]?.timestamp
     });
-    
-    // Sample the first few valid data points for verification
-    const sampleData = filteredData.slice(0, 10).map(d => ({
-      date: d.formattedDate,
-      buyBox: d.buyBoxPrice,
-      fba: d.fbaPrice,
-      offers: d.offerCount
-    }));
-    console.log('Sample data points:', sampleData);
     
     return { chartData: filteredData, dataStats: stats };
   }, [product.csv, product.asin]);
@@ -530,31 +568,20 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   // Filter data based on time range
   const filteredData = useMemo(() => {
     if (!aggregatedData.length) {
-      console.log('No aggregated data to filter');
       return [];
     }
     
     if (timeRange === 'all') {
-      console.log('Using all time range, returning all data:', aggregatedData.length);
       return aggregatedData;
     }
     
     const range = TIME_RANGES.find(r => r.value === timeRange);
     if (!range || !range.days) {
-      console.log('Invalid time range, returning all data:', timeRange);
       return aggregatedData;
     }
     
     const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
     const filtered = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
-    
-    console.log(`Time range filter '${timeRange}' (${range.days} days):`, {
-      originalCount: aggregatedData.length,
-      filteredCount: filtered.length,
-      cutoffTime: new Date(cutoffTime).toISOString(),
-      oldestDataPoint: aggregatedData[0]?.timestamp,
-      newestDataPoint: aggregatedData[aggregatedData.length - 1]?.timestamp
-    });
     
     return filtered;
   }, [aggregatedData, timeRange]);
@@ -584,18 +611,21 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     return null;
   };
 
-  // Generate data quality badge
+  // Generate enhanced data quality badge
   const getDataQualityBadge = () => {
     if (!dataStats) return null;
     
-    const qualityScore = dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1);
-    const qualityColor = qualityScore > 0.8 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                         qualityScore > 0.5 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+    const buyBoxSuccessRate = dataStats.buyBoxValidationStats.rawBuyBoxPoints > 0 
+      ? dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.rawBuyBoxPoints 
+      : 0;
+    
+    const qualityColor = buyBoxSuccessRate > 0.8 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                         buyBoxSuccessRate > 0.5 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
                          'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
     
     return (
       <Badge variant="secondary" className={qualityColor}>
-        {Math.round(qualityScore * 100)}% Data Quality
+        Buy Box: {Math.round(buyBoxSuccessRate * 100)}% Validated
       </Badge>
     );
   };
@@ -617,16 +647,12 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
               <p className="text-slate-600 dark:text-slate-400 mb-2">
                 No historical price data available for the selected time range
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                Processed points: {chartData.length} |
-                Time range: {timeRange} | 
-                Granularity: {granularity}
-              </p>
-              {dataStats && (
+              {dataStats?.buyBoxValidationStats && (
                 <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  <div>Data Quality: {dataStats.validPoints}/{dataStats.totalRawPoints} valid points</div>
-                  <div>Buy Box: {dataStats.seriesStats.buyBox?.validCount || 0}/{dataStats.seriesStats.buyBox?.rawCount || 0} valid</div>
-                  <div>FBA: {dataStats.seriesStats.fba?.validCount || 0}/{dataStats.seriesStats.fba?.rawCount || 0} valid</div>
+                  <div>Buy Box Validation Results:</div>
+                  <div>Raw Points: {dataStats.buyBoxValidationStats.rawBuyBoxPoints}</div>
+                  <div>Seller Correlation Rejected: {dataStats.buyBoxValidationStats.sellerCorrelationRejected}</div>
+                  <div>Valid Points: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
                 </div>
               )}
               {chartData.length > 0 && (
@@ -637,13 +663,6 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                     size="sm"
                   >
                     Show All Time Data
-                  </Button>
-                  <Button
-                    onClick={() => setGranularity('raw')}
-                    variant="outline"
-                    size="sm"
-                  >
-                    Show Raw Data
                   </Button>
                 </div>
               )}
@@ -662,7 +681,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
             <CardTitle className="flex items-center gap-2">
               {title}
               <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                Live Keepa Data ({filteredData.length} points)
+                Seller-Validated Data ({filteredData.length} points)
               </Badge>
               {getDataQualityBadge()}
             </CardTitle>
@@ -733,26 +752,39 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       </CardHeader>
       
       <CardContent>
-        {/* Enhanced Data Quality Statistics */}
+        {/* Enhanced Data Quality Statistics with Buy Box Validation Results */}
         {showDataStats && dataStats && (
           <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
-            <h4 className="text-sm font-semibold mb-2">Data Quality & Validation Results</h4>
+            <h4 className="text-sm font-semibold mb-2">Buy Box Seller Correlation Validation Results</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
-              <div>Total Points: {dataStats.totalRawPoints}</div>
-              <div>Valid Points: {dataStats.validPoints}</div>
-              <div>Filtered: {dataStats.filteredPoints}</div>
-              <div>Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</div>
+              <div>Raw Buy Box: {dataStats.buyBoxValidationStats.rawBuyBoxPoints}</div>
+              <div>Correlation Rejected: {dataStats.buyBoxValidationStats.sellerCorrelationRejected}</div>
+              <div>Basic Rejected: {dataStats.buyBoxValidationStats.basicValidationRejected}</div>
+              <div>Final Valid: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
               <div className="bg-white dark:bg-slate-800 p-2 rounded">
-                <div className="font-medium text-blue-600">Buy Box Analysis</div>
-                <div>Valid: {dataStats.seriesStats.buyBox?.validCount || 0}/{dataStats.seriesStats.buyBox?.rawCount || 0}</div>
-                <div>Success Rate: {dataStats.seriesStats.buyBox?.rawCount ? Math.round((dataStats.seriesStats.buyBox.validCount / dataStats.seriesStats.buyBox.rawCount) * 100) : 0}%</div>
+                <div className="font-medium text-blue-600">Validation Success Rate</div>
+                <div>
+                  {dataStats.buyBoxValidationStats.rawBuyBoxPoints > 0 
+                    ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.rawBuyBoxPoints) * 100)
+                    : 0}% of raw Buy Box prices validated
+                </div>
+                <div className="text-green-600">
+                  {dataStats.buyBoxValidationStats.sellerCorrelationRejected} phantom prices eliminated
+                </div>
               </div>
               <div className="bg-white dark:bg-slate-800 p-2 rounded">
-                <div className="font-medium text-green-600">FBA Analysis</div>
-                <div>Valid: {dataStats.seriesStats.fba?.validCount || 0}/{dataStats.seriesStats.fba?.rawCount || 0}</div>
-                <div>Success Rate: {dataStats.seriesStats.fba?.rawCount ? Math.round((dataStats.seriesStats.fba.validCount / dataStats.seriesStats.fba.rawCount) * 100) : 0}%</div>
+                <div className="font-medium text-purple-600">Data Quality Impact</div>
+                <div>
+                  Before: {dataStats.buyBoxValidationStats.rawBuyBoxPoints} Buy Box points
+                </div>
+                <div>
+                  After: {dataStats.buyBoxValidationStats.finalValidPoints} validated points
+                </div>
+                <div className="text-red-600">
+                  Removed {dataStats.buyBoxValidationStats.sellerCorrelationRejected} unmatched prices
+                </div>
               </div>
             </div>
           </div>
@@ -808,7 +840,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   <Label htmlFor="buybox-price" className="text-xs">
                     <span className="inline-block w-3 h-3 rounded-full mr-1" 
                           style={{ backgroundColor: COLOR_SCHEME.buyBoxPrice }}></span>
-                    Buy Box
+                    Buy Box (Validated)
                   </Label>
                 </div>
               </>
@@ -942,7 +974,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       dataKey="buyBoxPrice" 
                       stroke={COLOR_SCHEME.buyBoxPrice}
                       strokeWidth={2}
-                      name="Buy Box Price"
+                      name="Buy Box Price (Validated)"
                       dot={false}
                       connectNulls={fillGaps}
                     />
@@ -1011,13 +1043,18 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         
         {/* Enhanced Chart Info */}
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} data points ({granularity} granularity) from Keepa API
-          {dataStats && (
+          Showing {filteredData.length} data points ({granularity} granularity) with seller correlation validation
+          {dataStats?.buyBoxValidationStats && (
             <>
-              <span> | Data Quality: {Math.round((dataStats.validPoints / Math.max(dataStats.totalRawPoints, 1)) * 100)}%</span>
               <br />
-              <span>Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} points | </span>
-              <span>FBA: {filteredData.filter(d => d.fbaPrice !== undefined).length} points</span>
+              <span className="text-green-600">
+                Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} validated points 
+                ({dataStats.buyBoxValidationStats.sellerCorrelationRejected} phantom prices filtered out)
+              </span>
+              <br />
+              <span>Success Rate: {dataStats.buyBoxValidationStats.rawBuyBoxPoints > 0 
+                ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.rawBuyBoxPoints) * 100) 
+                : 0}% of raw Buy Box data validated against seller prices</span>
             </>
           )}
           <br />
