@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -333,68 +334,100 @@ serve(async (req) => {
     console.log('Final stock status:', inStock);
     console.log('=== END STOCK STATUS DETERMINATION ===');
     
-    // AMAZON PRICE DETECTION - Search through offers for Amazon's seller ID
-    console.log('=== AMAZON PRICE DETECTION DEBUG ===');
-    console.log('Product offers object keys:', product.offers ? Object.keys(product.offers) : 'No offers object');
+    // ENHANCED AMAZON PRICE DETECTION - PRIORITIZE CSV[0] OVER OFFERS
+    console.log('=== ENHANCED AMAZON PRICE DETECTION WITH CSV[0] PRIORITY ===');
     
     let amazonPrice = null;
+    let amazonPriceSource = 'none';
     
-    if (product.offers) {
-      // Search through all offers to find Amazon's seller ID: ATVPDKIKX0DER
-      for (const [offerId, offer] of Object.entries(product.offers)) {
-        console.log(`Checking offer ${offerId}:`, {
-          sellerId: offer.sellerId,
-          hasOfferCSV: !!offer.offerCSV,
-          offerCSVLength: offer.offerCSV?.length,
-          fullOfferCSV: offer.offerCSV
-        });
-        
-        if (offer.sellerId === 'ATVPDKIKX0DER') {
-          console.log('✅ Found Amazon offer (seller ID: ATVPDKIKX0DER)');
-          console.log('Amazon offer full offerCSV array:', offer.offerCSV);
-          
-          // Extract the most recent price from offerCSV - use the last value which should be most current
-          if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 1) {
-            // Try to get the last price value from the array (most recent)
-            const lastIndex = offer.offerCSV.length - 1;
-            let rawPrice = offer.offerCSV[lastIndex];
-            
-            console.log(`Amazon offer raw price from offerCSV[${lastIndex}] (last index):`, rawPrice);
-            
-            // If the last value is not a valid price, try the second-to-last
-            if ((!rawPrice || typeof rawPrice !== 'number' || rawPrice <= 0) && offer.offerCSV.length >= 2) {
-              rawPrice = offer.offerCSV[lastIndex - 1];
-              console.log(`Trying second-to-last value offerCSV[${lastIndex - 1}]:`, rawPrice);
-            }
-            
-            // If still not valid, try index 1 as fallback
-            if ((!rawPrice || typeof rawPrice !== 'number' || rawPrice <= 0) && offer.offerCSV.length >= 2) {
-              rawPrice = offer.offerCSV[1];
-              console.log(`Fallback to offerCSV[1]:`, rawPrice);
-            }
-            
-            if (typeof rawPrice === 'number' && rawPrice > 0) {
-              amazonPrice = rawPrice / 100; // Convert from cents to dollars
-              console.log('✅ Amazon Direct price found:', amazonPrice);
-              break; // Found Amazon's price, exit loop
-            } else {
-              console.log('❌ Amazon offer price is not valid:', rawPrice);
-            }
-          } else {
-            console.log('❌ Amazon offer does not have valid offerCSV data');
-          }
+    // METHOD 1: Extract from CSV[0] (Amazon price series) - PRIORITY METHOD
+    console.log('--- CSV[0] Amazon Price Series Analysis ---');
+    if (product.csv && product.csv[0] && Array.isArray(product.csv[0])) {
+      console.log('CSV[0] (Amazon series) exists with length:', product.csv[0].length);
+      console.log('CSV[0] sample data (last 20 values):', product.csv[0].slice(-20));
+      
+      // Find the most recent valid Amazon price (not -1)
+      for (let i = product.csv[0].length - 1; i >= 0; i--) {
+        const priceValue = product.csv[0][i];
+        if (typeof priceValue === 'number' && priceValue > 0 && priceValue !== -1) {
+          amazonPrice = priceValue / 100; // Convert from cents to dollars
+          amazonPriceSource = 'csv[0]';
+          console.log(`✅ Found Amazon price from CSV[0] at index ${i}: ${amazonPrice} (raw: ${priceValue})`);
+          break;
         }
       }
       
       if (!amazonPrice) {
-        console.log('❌ Amazon (ATVPDKIKX0DER) not found in offers or has invalid price');
+        console.log('❌ No valid Amazon price found in CSV[0] series (all values are -1 or invalid)');
       }
     } else {
-      console.log('❌ No offers object available');
+      console.log('❌ CSV[0] (Amazon series) not available or not an array');
     }
     
-    console.log('Final Amazon price decision:', amazonPrice);
-    console.log('=== END AMAZON PRICE DETECTION DEBUG ===');
+    // METHOD 2: Fallback to individual offers (ATVPDKIKX0DER) - FALLBACK ONLY
+    if (!amazonPrice) {
+      console.log('--- Fallback: Individual Amazon Offer Analysis ---');
+      console.log('Product offers object keys:', product.offers ? Object.keys(product.offers) : 'No offers object');
+      
+      if (product.offers) {
+        // Search through all offers to find Amazon's seller ID: ATVPDKIKX0DER
+        for (const [offerId, offer] of Object.entries(product.offers)) {
+          console.log(`Checking offer ${offerId}:`, {
+            sellerId: offer.sellerId,
+            hasOfferCSV: !!offer.offerCSV,
+            offerCSVLength: offer.offerCSV?.length,
+            fullOfferCSV: offer.offerCSV
+          });
+          
+          if (offer.sellerId === 'ATVPDKIKX0DER') {
+            console.log('✅ Found Amazon offer (seller ID: ATVPDKIKX0DER)');
+            console.log('Amazon offer full offerCSV array:', offer.offerCSV);
+            
+            // Extract the most recent price from offerCSV - use the last value which should be most current
+            if (offer.offerCSV && Array.isArray(offer.offerCSV) && offer.offerCSV.length >= 1) {
+              // Try to get the last price value from the array (most recent)
+              const lastIndex = offer.offerCSV.length - 1;
+              let rawPrice = offer.offerCSV[lastIndex];
+              
+              console.log(`Amazon offer raw price from offerCSV[${lastIndex}] (last index):`, rawPrice);
+              
+              // If the last value is not a valid price, try the second-to-last
+              if ((!rawPrice || typeof rawPrice !== 'number' || rawPrice <= 0) && offer.offerCSV.length >= 2) {
+                rawPrice = offer.offerCSV[lastIndex - 1];
+                console.log(`Trying second-to-last value offerCSV[${lastIndex - 1}]:`, rawPrice);
+              }
+              
+              // If still not valid, try index 1 as fallback
+              if ((!rawPrice || typeof rawPrice !== 'number' || rawPrice <= 0) && offer.offerCSV.length >= 2) {
+                rawPrice = offer.offerCSV[1];
+                console.log(`Fallback to offerCSV[1]:`, rawPrice);
+              }
+              
+              if (typeof rawPrice === 'number' && rawPrice > 0) {
+                amazonPrice = rawPrice / 100; // Convert from cents to dollars
+                amazonPriceSource = 'individual_offer';
+                console.log(`✅ Amazon Direct price found from individual offer: ${amazonPrice} (raw: ${rawPrice})`);
+                console.log('⚠️ WARNING: Using individual offer price as fallback - may be stale');
+                break; // Found Amazon's price, exit loop
+              } else {
+                console.log('❌ Amazon offer price is not valid:', rawPrice);
+              }
+            } else {
+              console.log('❌ Amazon offer does not have valid offerCSV data');
+            }
+          }
+        }
+        
+        if (!amazonPrice) {
+          console.log('❌ Amazon (ATVPDKIKX0DER) not found in offers or has invalid price');
+        }
+      } else {
+        console.log('❌ No offers object available for fallback Amazon price extraction');
+      }
+    }
+    
+    console.log(`Final Amazon price decision: ${amazonPrice} (source: ${amazonPriceSource})`);
+    console.log('=== END ENHANCED AMAZON PRICE DETECTION ===');
     
     // REVIEW RATING AND COUNT EXTRACTION
     console.log('=== REVIEW RATING AND COUNT EXTRACTION ===');
@@ -426,6 +459,7 @@ serve(async (req) => {
       buyBoxPrice: currentStats[18],
       lowestFBAPrice,
       amazonPrice,
+      amazonPriceSource,
       reviewRating,
       reviewCount,
       liveOffersCount: product.liveOffersOrder?.length || 0
