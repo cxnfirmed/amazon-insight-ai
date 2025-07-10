@@ -723,24 +723,83 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     return aggregateData(chartData, granularity);
   }, [chartData, granularity]);
 
+  // Generate complete timeline with gaps filled using last known values
   const filteredData = useMemo(() => {
     if (!aggregatedData.length) {
       return [];
     }
     
+    let baseData = aggregatedData;
+    let startTime: number;
+    let endTime: number;
+    
     if (timeRange === 'all') {
-      return aggregatedData;
+      startTime = baseData[0].timestampMs;
+      endTime = baseData[baseData.length - 1].timestampMs;
+    } else {
+      const range = TIME_RANGES.find(r => r.value === timeRange);
+      if (!range || !range.days) {
+        return baseData;
+      }
+      
+      const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
+      endTime = Date.now();
+      startTime = cutoffTime;
+      baseData = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
     }
     
-    const range = TIME_RANGES.find(r => r.value === timeRange);
-    if (!range || !range.days) {
-      return aggregatedData;
+    // Create complete daily timeline
+    const completeData: ChartDataPoint[] = [];
+    const dataMap = new Map<number, ChartDataPoint>();
+    
+    // Index existing data points by day
+    baseData.forEach(point => {
+      const dayStart = Math.floor(point.timestampMs / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
+      dataMap.set(dayStart, point);
+    });
+    
+    // Track last known values for each field
+    const lastKnownValues: Partial<ChartDataPoint> = {};
+    
+    // Generate daily timestamps from start to end
+    const startDay = Math.floor(startTime / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
+    const endDay = Math.floor(endTime / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
+    
+    for (let dayMs = startDay; dayMs <= endDay; dayMs += 24 * 60 * 60 * 1000) {
+      const existingPoint = dataMap.get(dayMs);
+      
+      if (existingPoint) {
+        // Update last known values with actual data
+        if (existingPoint.amazonPrice !== undefined) lastKnownValues.amazonPrice = existingPoint.amazonPrice;
+        if (existingPoint.fbaPrice !== undefined) lastKnownValues.fbaPrice = existingPoint.fbaPrice;
+        if (existingPoint.fbmPrice !== undefined) lastKnownValues.fbmPrice = existingPoint.fbmPrice;
+        if (existingPoint.buyBoxPrice !== undefined) lastKnownValues.buyBoxPrice = existingPoint.buyBoxPrice;
+        if (existingPoint.salesRank !== undefined) lastKnownValues.salesRank = existingPoint.salesRank;
+        if (existingPoint.reviewCount !== undefined) lastKnownValues.reviewCount = existingPoint.reviewCount;
+        if (existingPoint.rating !== undefined) lastKnownValues.rating = existingPoint.rating;
+        if (existingPoint.offerCount !== undefined) lastKnownValues.offerCount = existingPoint.offerCount;
+        
+        completeData.push(existingPoint);
+      } else {
+        // Create interpolated point with last known values
+        const date = new Date(dayMs);
+        completeData.push({
+          timestamp: date.toISOString(),
+          timestampMs: dayMs,
+          formattedDate: date.toLocaleDateString(),
+          amazonPrice: lastKnownValues.amazonPrice,
+          fbaPrice: lastKnownValues.fbaPrice,
+          fbmPrice: lastKnownValues.fbmPrice,
+          buyBoxPrice: lastKnownValues.buyBoxPrice,
+          salesRank: lastKnownValues.salesRank,
+          reviewCount: lastKnownValues.reviewCount,
+          rating: lastKnownValues.rating,
+          offerCount: lastKnownValues.offerCount,
+        });
+      }
     }
     
-    const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
-    const filtered = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
-    
-    return filtered;
+    return completeData;
   }, [aggregatedData, timeRange]);
 
   const toggleLineVisibility = (line: keyof LineVisibility) => {
@@ -751,17 +810,79 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
+    if (active && label) {
+      // Find the data point for this timestamp
+      const timestamp = Number(label);
+      const dataPoint = filteredData.find(d => d.timestampMs === timestamp);
+      
+      if (!dataPoint) return null;
+      
+      const formatValue = (name: string, value: number | undefined) => {
+        if (value === undefined) return null;
+        if (name.includes('Price')) return `$${value.toFixed(2)}`;
+        return value.toLocaleString();
+      };
+      
       return (
         <div className="bg-white dark:bg-slate-800 p-3 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg">
           <p className="font-semibold text-slate-900 dark:text-white">
-            {new Date(label).toLocaleDateString()}
+            {new Date(timestamp).toLocaleDateString()}
           </p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }} className="text-sm">
-              {entry.name}: {entry.name.includes('Price') ? `$${entry.value?.toFixed(2)}` : entry.value?.toLocaleString()}
-            </p>
-          ))}
+          
+          {chartMode === 'price' && (
+            <>
+              {lineVisibility.buyBoxPrice && dataPoint.buyBoxPrice !== undefined && (
+                <p style={{ color: COLOR_SCHEME.buyBoxPrice }} className="text-sm">
+                  Buy Box (Shipping Included): {formatValue('Buy Box Price', dataPoint.buyBoxPrice)}
+                </p>
+              )}
+              {lineVisibility.amazonPrice && dataPoint.amazonPrice !== undefined && (
+                <p style={{ color: COLOR_SCHEME.amazonPrice }} className="text-sm">
+                  Amazon Price: {formatValue('Amazon Price', dataPoint.amazonPrice)}
+                </p>
+              )}
+              {lineVisibility.fbaPrice && dataPoint.fbaPrice !== undefined && (
+                <p style={{ color: COLOR_SCHEME.fbaPrice }} className="text-sm">
+                  FBA Price: {formatValue('FBA Price', dataPoint.fbaPrice)}
+                </p>
+              )}
+              {lineVisibility.fbmPrice && dataPoint.fbmPrice !== undefined && (
+                <p style={{ color: COLOR_SCHEME.fbmPrice }} className="text-sm">
+                  FBM Price: {formatValue('FBM Price', dataPoint.fbmPrice)}
+                </p>
+              )}
+            </>
+          )}
+          
+          {chartMode === 'sales' && (
+            <>
+              {lineVisibility.salesRank && dataPoint.salesRank !== undefined && (
+                <p style={{ color: COLOR_SCHEME.salesRank }} className="text-sm">
+                  Sales Rank: {formatValue('Sales Rank', dataPoint.salesRank)}
+                </p>
+              )}
+              {lineVisibility.offerCount && dataPoint.offerCount !== undefined && (
+                <p style={{ color: COLOR_SCHEME.offerCount }} className="text-sm">
+                  Offer Count: {formatValue('Offer Count', dataPoint.offerCount)}
+                </p>
+              )}
+            </>
+          )}
+          
+          {chartMode === 'reviews' && (
+            <>
+              {lineVisibility.reviewCount && dataPoint.reviewCount !== undefined && (
+                <p style={{ color: COLOR_SCHEME.reviewCount }} className="text-sm">
+                  Review Count: {formatValue('Review Count', dataPoint.reviewCount)}
+                </p>
+              )}
+              {lineVisibility.rating && dataPoint.rating !== undefined && (
+                <p style={{ color: COLOR_SCHEME.rating }} className="text-sm">
+                  Rating: {formatValue('Rating', dataPoint.rating)}
+                </p>
+              )}
+            </>
+          )}
         </div>
       );
     }
@@ -1073,6 +1194,8 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                 scale="time"
                 domain={['dataMin', 'dataMax']}
                 tick={{ fontSize: 12 }}
+                tickCount={Math.min(10, Math.ceil(filteredData.length / 7))}
+                interval="preserveStartEnd"
                 tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { 
                   month: 'short', 
                   day: 'numeric' 
