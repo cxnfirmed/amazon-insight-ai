@@ -424,8 +424,114 @@ const reconstructValidatedBuyBoxData = (
   return { series: validatedBuyBox, stats };
 };
 
-// Enhanced CSV parsing (keep existing code)
+// Enhanced CSV parsing with forward-filling support
+const parseCsvSeriesWithForwardFill = (csvArray: number[], seriesType: string): { series: ParsedSeries; stats: { rawCount: number; validCount: number; filteredCount: number; filterReasons: string[] } } => {
+  const series: ParsedSeries = {};
+  const stats = { rawCount: 0, validCount: 0, filteredCount: 0, filterReasons: [] as string[] };
+  
+  if (!Array.isArray(csvArray) || csvArray.length < 2) {
+    console.log(`${seriesType}: No data or invalid array`);
+    return { series, stats };
+  }
+  
+  stats.rawCount = Math.floor(csvArray.length / 2);
+  console.log(`${seriesType}: Processing ${stats.rawCount} raw data points`);
+  
+  // Parse alternating [timestamp, value] format
+  const parsedPoints: Array<{ timestamp: number; value: number }> = [];
+  
+  for (let i = 0; i < csvArray.length - 1; i += 2) {
+    const timestampMinutes = csvArray[i];
+    const rawValue = csvArray[i + 1];
+    
+    if (typeof timestampMinutes !== 'number' || typeof rawValue !== 'number') {
+      stats.filteredCount++;
+      stats.filterReasons.push('Invalid timestamp or value type');
+      continue;
+    }
+    
+    // Skip Keepa's -1 placeholder values
+    if (rawValue === -1) {
+      stats.filteredCount++;
+      stats.filterReasons.push('Keepa placeholder (-1)');
+      continue;
+    }
+    
+    // Convert price values (divide by 100) except for non-price fields
+    let processedValue = rawValue;
+    if (['amazon', 'fba', 'fbm'].includes(seriesType)) {
+      processedValue = rawValue / 100;
+    } else if (seriesType === 'rating') {
+      processedValue = rawValue / 10;
+    }
+    
+    // Apply validation based on series type
+    let isValid = false;
+    if (['amazon', 'fba', 'fbm'].includes(seriesType)) {
+      isValid = processedValue > 0.01 && processedValue < 50000;
+    } else {
+      isValid = processedValue >= 0;
+    }
+    
+    if (isValid) {
+      parsedPoints.push({ timestamp: timestampMinutes, value: processedValue });
+      stats.validCount++;
+    } else {
+      stats.filteredCount++;
+      stats.filterReasons.push(`Invalid ${seriesType} value: ${processedValue}`);
+    }
+  }
+  
+  // Sort points by timestamp
+  parsedPoints.sort((a, b) => a.timestamp - b.timestamp);
+  
+  // For FBA series, implement forward-filling
+  if (seriesType === 'fba' && parsedPoints.length > 0) {
+    console.log(`${seriesType}: Implementing forward-filling for continuity`);
+    
+    // Create continuous timeline with forward-filled values
+    const minTimestamp = parsedPoints[0].timestamp;
+    const maxTimestamp = parsedPoints[parsedPoints.length - 1].timestamp;
+    
+    let lastKnownValue = parsedPoints[0].value;
+    let currentPointIndex = 0;
+    
+    // Fill in gaps with forward-filled values (every 60 minutes for reasonable density)
+    for (let timestamp = minTimestamp; timestamp <= maxTimestamp; timestamp += 60) {
+      // Check if we have a real data point at this timestamp
+      while (currentPointIndex < parsedPoints.length && parsedPoints[currentPointIndex].timestamp <= timestamp) {
+        if (parsedPoints[currentPointIndex].timestamp === timestamp) {
+          lastKnownValue = parsedPoints[currentPointIndex].value;
+          series[timestamp] = lastKnownValue;
+        } else if (parsedPoints[currentPointIndex].timestamp < timestamp) {
+          lastKnownValue = parsedPoints[currentPointIndex].value;
+        }
+        currentPointIndex++;
+      }
+      
+      // If no exact match, use forward-filled value
+      if (!series[timestamp] && lastKnownValue) {
+        series[timestamp] = lastKnownValue;
+      }
+    }
+    
+    console.log(`${seriesType}: Created ${Object.keys(series).length} data points with forward-filling`);
+  } else {
+    // For non-FBA series, use original logic
+    parsedPoints.forEach(point => {
+      series[point.timestamp] = point.value;
+    });
+  }
+  
+  return { series, stats };
+};
+
+// Legacy CSV parsing function (for non-FBA series)
 const parseCsvSeries = (csvArray: number[], seriesType: string): { series: ParsedSeries; stats: { rawCount: number; validCount: number; filteredCount: number; filterReasons: string[] } } => {
+  if (seriesType === 'fba') {
+    return parseCsvSeriesWithForwardFill(csvArray, seriesType);
+  }
+  
   const series: ParsedSeries = {};
   const stats = { rawCount: 0, validCount: 0, filteredCount: 0, filterReasons: [] as string[] };
   
@@ -540,7 +646,7 @@ const mergeSeriesWithValidatedBuyBox = (
     const rating = seriesData.rating?.[keepaTimestamp];
     const reviewCount = seriesData.reviewCount?.[keepaTimestamp];
     
-    if (buyBoxPrice !== undefined) {
+    if (buyBoxPrice !== undefined || fbaPrice !== undefined) {
       stats.validPoints++;
     }
     
@@ -559,9 +665,13 @@ const mergeSeriesWithValidatedBuyBox = (
     };
   });
   
-  console.log('=== VALIDATED BUY BOX RESULTS ===');
-  console.log(`Validated Buy Box Points: ${stats.buyBoxValidationStats.finalValidPoints}`);
-  console.log(`Validation Success Rate: ${stats.buyBoxValidationStats.totalBuyBoxTimestamps ? Math.round((stats.buyBoxValidationStats.finalValidPoints / stats.buyBoxValidationStats.totalBuyBoxTimestamps) * 100) : 0}%`);
+  // Log FBA data statistics
+  const fbaDataPoints = dataPoints.filter(d => d.fbaPrice !== undefined);
+  console.log('=== NEW_FBA (CSV[16]) RESULTS ===');
+  console.log(`FBA Data Points Plotted: ${fbaDataPoints.length}`);
+  console.log(`FBA Data Coverage: ${fbaDataPoints.length > 0 ? 
+    `${new Date(fbaDataPoints[0].timestampMs).toLocaleDateString()} to ${new Date(fbaDataPoints[fbaDataPoints.length - 1].timestampMs).toLocaleDateString()}` : 
+    'No data'}`);
   
   return { data: dataPoints, stats };
 };
@@ -646,9 +756,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with Buy Box shipping data
+  // Parse Keepa CSV data with NEW_FBA series
   const { chartData, dataStats } = useMemo(() => {
-    console.log('=== PROCESSING CHART DATA WITH BUY BOX SHIPPING ===');
+    console.log('=== PROCESSING CHART DATA WITH NEW_FBA (CSV[16]) ===');
     console.log('Product ASIN:', product.asin);
     console.log('Product CSV structure:', Object.keys(product.csv || {}));
     
@@ -657,7 +767,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: null };
     }
 
-    // Parse each CSV series separately
+    // Parse each CSV series separately - UPDATED FBA to use CSV[16]
     const seriesData: { [key: string]: ParsedSeries } = {};
     let offerCountSeries: ParsedSeries = {};
     
@@ -666,7 +776,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       amazon: 0,        // Amazon price
       salesRank: 4,     // Sales rank
       offerCount: 5,    // Offer count
-      fba: 16,          // FBA price (NEW_FBA)
+      fba: 16,          // NEW_FBA price (UPDATED to use CSV[16])
       fbm: 18,          // FBM price (NEW_FBM)
       rating: 44,       // Rating
       reviewCount: 45   // Review count
@@ -677,13 +787,19 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       const csvArray = product.csv[csvIndex];
       if (csvArray && Array.isArray(csvArray) && csvArray.length > 0) {
         console.log(`=== PARSING ${fieldName.toUpperCase()} (CSV[${csvIndex}]) ===`);
-        const { series } = parseCsvSeries(csvArray, fieldName);
+        const { series, stats } = parseCsvSeries(csvArray, fieldName);
         if (fieldName === 'offerCount') {
           offerCountSeries = series;
         } else {
           seriesData[fieldName] = series;
         }
         console.log(`${fieldName} final result:`, Object.keys(series).length, 'data points');
+        
+        // Special logging for FBA data
+        if (fieldName === 'fba') {
+          console.log(`✅ NEW_FBA (CSV[16]) Successfully Parsed: ${Object.keys(series).length} valid data points`);
+          console.log('FBA Statistics:', stats);
+        }
       }
     });
     
@@ -708,8 +824,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     // Sort data chronologically
     let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
     
-    console.log('=== FINAL RESULTS WITH BUY BOX SHIPPING ===');
+    console.log('=== FINAL RESULTS WITH NEW_FBA (CSV[16]) ===');
     console.log('Total processed data points:', filteredData.length);
+    console.log('NEW_FBA data points:', filteredData.filter(d => d.fbaPrice !== undefined).length);
     console.log('Buy Box shipping data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
     console.log('Date range:', {
       first: filteredData[0]?.timestamp,
@@ -757,11 +874,19 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
           <p className="font-semibold text-slate-900 dark:text-white">
             {new Date(label).toLocaleDateString()} {new Date(label).toLocaleTimeString()}
           </p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }} className="text-sm">
-              {entry.name}: {entry.name.includes('Price') ? `$${entry.value?.toFixed(2)}` : entry.value?.toLocaleString()}
-            </p>
-          ))}
+          {payload.map((entry: any, index: number) => {
+            // Update FBA tooltip label
+            let displayName = entry.name;
+            if (entry.name === 'FBA Price') {
+              displayName = 'FBA Price (Shipping Included)';
+            }
+            
+            return (
+              <p key={index} style={{ color: entry.color }} className="text-sm">
+                {displayName}: {entry.name.includes('Price') ? `$${entry.value?.toFixed(2)}` : entry.value?.toLocaleString()}
+              </p>
+            );
+          })}
         </div>
       );
     }
@@ -808,7 +933,11 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                 <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
                   <div>Buy Box Validation Results:</div>
                   <div>Total Timestamps: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps}</div>
-                  <div>Validated Points: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
+                  <div>Seller ID Found: {dataStats.buyBoxValidationStats.sellerIdFound}</div>
+                  <div>Seller In Offers: {dataStats.buyBoxValidationStats.sellerInOffers}</div>
+                  <div>Price Matches: {dataStats.buyBoxValidationStats.priceMatches}</div>
+                  <div>Validated: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
+                  <div>Discarded: {dataStats.buyBoxValidationStats.discardedPoints}</div>
                 </div>
               )}
               {chartData.length > 0 && (
@@ -837,7 +966,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
             <CardTitle className="flex items-center gap-2">
               {title}
               <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                Buy Box Shipping Data ({filteredData.length} points)
+                NEW_FBA Series ({filteredData.filter(d => d.fbaPrice !== undefined).length} FBA points)
               </Badge>
               {getDataQualityBadge()}
             </CardTitle>
@@ -972,7 +1101,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                   <Label htmlFor="fba-price" className="text-xs">
                     <span className="inline-block w-3 h-3 rounded-full mr-1" 
                           style={{ backgroundColor: COLOR_SCHEME.fbaPrice }}></span>
-                    FBA
+                    FBA (Shipping Included)
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -1197,22 +1326,18 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         
         {/* Enhanced Chart Info */}
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} data points ({granularity} granularity) with seller-validated Buy Box
-          {dataStats?.buyBoxValidationStats && (
+          Showing {filteredData.length} data points ({granularity} granularity) with NEW_FBA series (CSV[16])
+          {dataStats && (
             <>
+              <br />
+              <span className="text-blue-600">
+                FBA (NEW_FBA): {filteredData.filter(d => d.fbaPrice !== undefined).length} data points with forward-filling
+              </span>
               <br />
               <span className="text-green-600">
                 Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} seller-validated points 
                 (from {Object.keys(dataStats.buyBoxValidationStats.sellerBreakdown).length} different sellers)
               </span>
-              <br />
-              <span className="text-red-600">
-                Discarded: {dataStats.buyBoxValidationStats.discardedPoints} phantom Buy Box points eliminated
-              </span>
-              <br />
-              <span>Validation Rate: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps > 0 
-                ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.totalBuyBoxTimestamps) * 100) 
-                : 0}% of available timestamps successfully validated using seller offerCSV data</span>
             </>
           )}
           <br />
