@@ -111,10 +111,10 @@ const GRANULARITY_OPTIONS = [
 ];
 
 const COLOR_SCHEME = {
-  amazonPrice: '#FF9500',
-  fbaPrice: '#3B82F6',
-  fbmPrice: '#EC4899',
-  buyBoxPrice: '#6B7280',
+  amazonPrice: '#FFB366',    // Light orange
+  fbaPrice: '#FF6B35',       // Dark orange
+  fbmPrice: '#87CEEB',       // Light blue
+  buyBoxPrice: '#FF69B4',    // Pink
   salesRank: '#10B981',
   reviewCount: '#8B5CF6',
   rating: '#F59E0B',
