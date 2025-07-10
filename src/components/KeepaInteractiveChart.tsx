@@ -750,49 +750,8 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     }));
   };
 
-  const CustomTooltip = ({ active, payload, label, coordinate }: any) => {
+  const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
-      // If fillGaps is enabled and we have coordinate info, try to interpolate missing values
-      if (fillGaps && coordinate) {
-        const enhancedPayload = [...payload];
-        
-        // For each data series, if it's missing a value, try to interpolate from nearby points
-        const allDataKeys = ['amazonPrice', 'fbaPrice', 'fbmPrice', 'buyBoxPrice', 'salesRank', 'offerCount', 'reviewCount', 'rating'];
-        
-        allDataKeys.forEach(dataKey => {
-          const existingEntry = payload.find((p: any) => p.dataKey === dataKey);
-          
-          // If this data key is not in the payload but should be visible, try to interpolate
-          if (!existingEntry && lineVisibility[dataKey as keyof LineVisibility]) {
-            const interpolatedValue = interpolateValueAtTimestamp(filteredData, label, dataKey);
-            
-            if (interpolatedValue !== null) {
-              enhancedPayload.push({
-                dataKey,
-                name: getDataKeyDisplayName(dataKey),
-                value: interpolatedValue,
-                color: COLOR_SCHEME[dataKey as keyof typeof COLOR_SCHEME],
-                payload: { [dataKey]: interpolatedValue }
-              });
-            }
-          }
-        });
-        
-        return (
-          <div className="bg-white dark:bg-slate-800 p-3 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg">
-            <p className="font-semibold text-slate-900 dark:text-white">
-              {new Date(label).toLocaleDateString()}
-            </p>
-            {enhancedPayload.map((entry: any, index: number) => (
-              <p key={index} style={{ color: entry.color }} className="text-sm">
-                {entry.name}: {entry.name.includes('Price') ? `$${entry.value?.toFixed(2)}` : entry.value?.toLocaleString()}
-              </p>
-            ))}
-          </div>
-        );
-      }
-      
-      // Default behavior for non-gap filling
       return (
         <div className="bg-white dark:bg-slate-800 p-3 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg">
           <p className="font-semibold text-slate-900 dark:text-white">
@@ -807,62 +766,6 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       );
     }
     return null;
-  };
-
-  // Helper function to interpolate values at a given timestamp
-  const interpolateValueAtTimestamp = (data: any[], timestamp: number, dataKey: string): number | null => {
-    // Find the nearest points with actual data for this key
-    let beforePoint = null;
-    let afterPoint = null;
-    
-    for (let i = 0; i < data.length; i++) {
-      const point = data[i];
-      if (point[dataKey] !== undefined && point[dataKey] !== null) {
-        if (point.timestampMs <= timestamp) {
-          beforePoint = point;
-        } else if (point.timestampMs > timestamp && !afterPoint) {
-          afterPoint = point;
-          break;
-        }
-      }
-    }
-    
-    // If we have both before and after points, interpolate
-    if (beforePoint && afterPoint) {
-      const timeDiff = afterPoint.timestampMs - beforePoint.timestampMs;
-      const valueAtTarget = timestamp;
-      const timeFromBefore = valueAtTarget - beforePoint.timestampMs;
-      const ratio = timeFromBefore / timeDiff;
-      
-      return beforePoint[dataKey] + (afterPoint[dataKey] - beforePoint[dataKey]) * ratio;
-    }
-    
-    // If we only have a before point, use that value
-    if (beforePoint) {
-      return beforePoint[dataKey];
-    }
-    
-    // If we only have an after point, use that value
-    if (afterPoint) {
-      return afterPoint[dataKey];
-    }
-    
-    return null;
-  };
-
-  // Helper function to get display names for data keys
-  const getDataKeyDisplayName = (dataKey: string): string => {
-    const displayNames: { [key: string]: string } = {
-      amazonPrice: 'Amazon Price',
-      fbaPrice: 'FBA Price',
-      fbmPrice: 'FBM Price',
-      buyBoxPrice: 'Buy Box (Shipping Included)',
-      salesRank: 'Sales Rank',
-      offerCount: 'Offer Count',
-      reviewCount: 'Review Count',
-      rating: 'Rating'
-    };
-    return displayNames[dataKey] || dataKey;
   };
 
   // Generate enhanced data quality badge with validation stats
