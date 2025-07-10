@@ -329,9 +329,9 @@ const findSellerPriceAtTimestamp = (
   return bestPrice;
 };
 
-// Parse Buy Box data directly from csv[3] (BUY_BOX_SHIPPING)
+// NEW: Parse Buy Box data from CSV[10] (BUY_BOX_SHIPPING)
 const parseBuyBoxShippingData = (product: AmazonProduct): { series: ParsedSeries; stats: BuyBoxValidationStats } => {
-  console.log('=== PARSING BUY BOX SHIPPING DATA (CSV[3]) ===');
+  console.log('=== PARSING BUY BOX SHIPPING DATA (CSV[10]) ===');
   
   const buyBoxSeries: ParsedSeries = {};
   const stats: BuyBoxValidationStats = {
@@ -345,46 +345,55 @@ const parseBuyBoxShippingData = (product: AmazonProduct): { series: ParsedSeries
     matchingDetails: []
   };
 
-  const csvArray = product.csv?.[3]; // BUY_BOX_SHIPPING
+  const csvArray = product.csv?.[10]; // BUY_BOX_SHIPPING
   if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
-    console.log('❌ No BUY_BOX_SHIPPING data found in CSV[3]');
+    console.log('❌ No BUY_BOX_SHIPPING data found in CSV[10]');
     return { series: buyBoxSeries, stats };
   }
 
-  console.log(`Processing ${Math.floor(csvArray.length / 2)} Buy Box shipping data points from CSV[3]`);
+  console.log(`Processing ${Math.floor(csvArray.length / 2)} Buy Box shipping data points from CSV[10]`);
   stats.totalBuyBoxTimestamps = Math.floor(csvArray.length / 2);
 
-  // Parse alternating [timestamp, priceInCents] format (same as other Keepa data)
+  // Keepa epoch: January 1, 2011 00:00:00 UTC in seconds
+  const KEEPA_EPOCH_SECONDS = 1293840000;
+
+  // Parse alternating [minutesSinceStart, priceInCents] format
   for (let i = 0; i < csvArray.length - 1; i += 2) {
-    const timestampMinutes = csvArray[i];
+    const minutesSinceStart = csvArray[i];
     const priceInCents = csvArray[i + 1];
     
-    if (typeof timestampMinutes !== 'number' || typeof priceInCents !== 'number') {
+    if (typeof minutesSinceStart !== 'number' || typeof priceInCents !== 'number') {
       stats.discardedPoints++;
       continue;
     }
     
     // Skip Keepa's -1 placeholder values
-    if (priceInCents === -1 || timestampMinutes === -1) {
+    if (priceInCents === -1 || minutesSinceStart === -1) {
       stats.discardedPoints++;
       continue;
     }
     
+    // Convert timestamp: (1293840000 + minutesSinceStart * 60) * 1000
+    const timestampSeconds = KEEPA_EPOCH_SECONDS + (minutesSinceStart * 60);
+    const timestampMs = timestampSeconds * 1000;
+    
+    // Convert to Keepa minutes format for consistency with other data
+    const keepaMinutes = (timestampMs - KEEPA_EPOCH) / (60 * 1000);
+    
     // Convert price from cents to dollars
     const priceInDollars = priceInCents / 100;
     
-    // Accept all csv[3] datapoints unless price is clearly invalid (> $2000 or < $0.10)
-    if (priceInDollars >= 0.10 && priceInDollars <= 2000) {
-      buyBoxSeries[timestampMinutes] = priceInDollars;
+    // Validate price
+    if (isValidPrice(priceInDollars)) {
+      buyBoxSeries[keepaMinutes] = priceInDollars;
       stats.finalValidPoints++;
       stats.priceMatches++;
     } else {
       stats.discardedPoints++;
-      console.log(`Discarded invalid price: $${priceInDollars} at timestamp ${timestampMinutes}`);
     }
   }
   
-  console.log(`✅ Parsed ${stats.finalValidPoints} valid Buy Box shipping data points from CSV[3]`);
+  console.log(`✅ Parsed ${stats.finalValidPoints} valid Buy Box shipping data points`);
   console.log(`Success Rate: ${stats.totalBuyBoxTimestamps > 0 ? Math.round((stats.finalValidPoints / stats.totalBuyBoxTimestamps) * 100) : 0}%`);
   
   return { series: buyBoxSeries, stats };
@@ -624,9 +633,8 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
   const [timeRange, setTimeRange] = useState('all');
   const [granularity, setGranularity] = useState('raw');
   const [chartMode, setChartMode] = useState<'price' | 'sales' | 'reviews'>('price');
-  const [fillGaps, setFillGaps] = useState(true);
+  const [fillGaps, setFillGaps] = useState(false);
   const [showDataStats, setShowDataStats] = useState(true);
-  const [useSellerValidatedBuyBox, setUseSellerValidatedBuyBox] = useState(false);
   const [lineVisibility, setLineVisibility] = useState<LineVisibility>({
     amazonPrice: true,
     fbaPrice: true,
@@ -679,23 +687,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       }
     });
     
-    // Choose Buy Box data source based on user preference
-    let buyBoxSeries: ParsedSeries;
-    let buyBoxStats: BuyBoxValidationStats;
-    
-    if (useSellerValidatedBuyBox) {
-      console.log('=== USING SELLER-VALIDATED BUY BOX DATA ===');
-      const buyBoxSellerHistory = parseBuyBoxSellerIdHistory(product);
-      const sellerOffers = parseSellerOffers(product);
-      const validatedResult = reconstructValidatedBuyBoxData(buyBoxSellerHistory, sellerOffers);
-      buyBoxSeries = validatedResult.series;
-      buyBoxStats = validatedResult.stats;
-    } else {
-      console.log('=== USING BUY BOX SHIPPING DATA FROM CSV[3] ===');
-      const directResult = parseBuyBoxShippingData(product);
-      buyBoxSeries = directResult.series;
-      buyBoxStats = directResult.stats;
-    }
+    // Use Buy Box shipping data from CSV[10]
+    console.log('=== PARSING BUY BOX SHIPPING DATA FROM CSV[10] ===');
+    const { series: buyBoxSeries, stats: buyBoxStats } = parseBuyBoxShippingData(product);
     
     // Merge all series with Buy Box shipping data
     console.log('=== MERGING SERIES DATA WITH BUY BOX SHIPPING ===');
@@ -723,7 +717,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     });
     
     return { chartData: filteredData, dataStats: stats };
-  }, [product.csv, product.asin, useSellerValidatedBuyBox]);
+  }, [product.csv, product.asin]);
 
   const aggregatedData = useMemo(() => {
     return aggregateData(chartData, granularity);
@@ -734,95 +728,20 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return [];
     }
     
-    let baseData = aggregatedData;
-    
-    // Apply time range filter
-    if (timeRange !== 'all') {
-      const range = TIME_RANGES.find(r => r.value === timeRange);
-      if (range && range.days) {
-        const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
-        baseData = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
-      }
+    if (timeRange === 'all') {
+      return aggregatedData;
     }
     
-    if (!baseData.length) return [];
-    
-    // Create continuous daily X-axis with gap filling
-    const startTime = baseData[0].timestampMs;
-    const endTime = baseData[baseData.length - 1].timestampMs;
-    const oneDay = 24 * 60 * 60 * 1000;
-    
-    // Generate all daily timestamps in range
-    const allDailyTimestamps: number[] = [];
-    for (let time = Math.floor(startTime / oneDay) * oneDay; time <= endTime; time += oneDay) {
-      allDailyTimestamps.push(time);
+    const range = TIME_RANGES.find(r => r.value === timeRange);
+    if (!range || !range.days) {
+      return aggregatedData;
     }
     
-    // Create continuous data with gap filling
-    const continuousData: ChartDataPoint[] = [];
-    let lastKnownValues: Partial<ChartDataPoint> = {};
+    const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
+    const filtered = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
     
-    allDailyTimestamps.forEach(dailyTimestamp => {
-      // Find data points within this day
-      const dayEnd = dailyTimestamp + oneDay;
-      const dayData = baseData.filter(point => 
-        point.timestampMs >= dailyTimestamp && point.timestampMs < dayEnd
-      );
-      
-      if (dayData.length > 0) {
-        // Use the latest data point from this day
-        const latestPoint = dayData[dayData.length - 1];
-        const dataPoint = {
-          ...latestPoint,
-          timestamp: new Date(dailyTimestamp).toISOString(),
-          timestampMs: dailyTimestamp,
-          formattedDate: new Date(dailyTimestamp).toLocaleDateString()
-        };
-        
-        // Update last known values for gap filling
-        Object.keys(dataPoint).forEach(key => {
-          const value = (dataPoint as any)[key];
-          if (value !== undefined && value !== null && typeof value === 'number') {
-            (lastKnownValues as any)[key] = value;
-          }
-        });
-        
-        continuousData.push(dataPoint);
-      } else if (fillGaps && Object.keys(lastKnownValues).length > 0) {
-        // Create gap-filled point with last known values
-        continuousData.push({
-          timestamp: new Date(dailyTimestamp).toISOString(),
-          timestampMs: dailyTimestamp,
-          formattedDate: new Date(dailyTimestamp).toLocaleDateString(),
-          amazonPrice: lastKnownValues.amazonPrice,
-          fbaPrice: lastKnownValues.fbaPrice,
-          fbmPrice: lastKnownValues.fbmPrice,
-          buyBoxPrice: lastKnownValues.buyBoxPrice,
-          salesRank: lastKnownValues.salesRank,
-          reviewCount: lastKnownValues.reviewCount,
-          rating: lastKnownValues.rating,
-          offerCount: lastKnownValues.offerCount
-        });
-      } else {
-        // Create empty point to maintain X-axis continuity
-        continuousData.push({
-          timestamp: new Date(dailyTimestamp).toISOString(),
-          timestampMs: dailyTimestamp,
-          formattedDate: new Date(dailyTimestamp).toLocaleDateString(),
-          amazonPrice: undefined,
-          fbaPrice: undefined,
-          fbmPrice: undefined,
-          buyBoxPrice: undefined,
-          salesRank: undefined,
-          reviewCount: undefined,
-          rating: undefined,
-          offerCount: undefined
-        });
-      }
-    });
-    
-    return continuousData;
-  }, [aggregatedData, timeRange, fillGaps]);
+    return filtered;
+  }, [aggregatedData, timeRange]);
 
   const toggleLineVisibility = (line: keyof LineVisibility) => {
     setLineVisibility(prev => ({
@@ -863,7 +782,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     
     return (
       <Badge variant="secondary" className={qualityColor}>
-        Buy Box CSV[3]: {Math.round(validationSuccessRate * 100)}% Valid
+        Buy Box: {Math.round(validationSuccessRate * 100)}% Validated
       </Badge>
     );
   };
@@ -918,7 +837,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
             <CardTitle className="flex items-center gap-2">
               {title}
               <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                {useSellerValidatedBuyBox ? 'Seller-Validated' : 'CSV[3] Direct'} ({filteredData.length} points)
+                Buy Box Shipping Data ({filteredData.length} points)
               </Badge>
               {getDataQualityBadge()}
             </CardTitle>
@@ -973,15 +892,6 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
             
             <div className="flex items-center space-x-2">
               <Switch
-                id="seller-validated"
-                checked={useSellerValidatedBuyBox}
-                onCheckedChange={setUseSellerValidatedBuyBox}
-              />
-              <Label htmlFor="seller-validated" className="text-sm">Seller-Validated Buy Box</Label>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <Switch
                 id="show-stats"
                 checked={showDataStats}
                 onCheckedChange={setShowDataStats}
@@ -996,44 +906,43 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         {/* Enhanced Data Quality Statistics with Validation Results */}
         {showDataStats && dataStats && (
           <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
-            <h4 className="text-sm font-semibold mb-2">
-              Buy Box Data Quality ({useSellerValidatedBuyBox ? 'Seller-Validated' : 'CSV[3] Direct'})
-            </h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
-              <div>Total Raw Points: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps}</div>
-              <div>Valid Points: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
+            <h4 className="text-sm font-semibold mb-2">Buy Box Validation Results</h4>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs mb-3">
+              <div>Total Timestamps: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps}</div>
+              <div>Seller ID Found: {dataStats.buyBoxValidationStats.sellerIdFound}</div>
+              <div>Seller In Offers: {dataStats.buyBoxValidationStats.sellerInOffers}</div>
+              <div>Price Matches: {dataStats.buyBoxValidationStats.priceMatches}</div>
+              <div>Validated: {dataStats.buyBoxValidationStats.finalValidPoints}</div>
               <div>Discarded: {dataStats.buyBoxValidationStats.discardedPoints}</div>
-              <div>Success Rate: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps > 0 
-                ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.totalBuyBoxTimestamps) * 100)
-                : 0}%</div>
             </div>
-            <div className="bg-white dark:bg-slate-800 p-2 rounded">
-              {useSellerValidatedBuyBox ? (
-                <>
-                  <div className="font-medium text-purple-600">Seller-Validated Processing</div>
-                  <div className="text-green-600">
-                    {dataStats.buyBoxValidationStats.finalValidPoints} seller-backed Buy Box points
-                  </div>
-                  <div className="text-slate-600">
-                    Cross-referenced with seller offers for validation
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="font-medium text-blue-600">Direct CSV[3] Processing</div>
-                  <div className="text-green-600">
-                    {dataStats.buyBoxValidationStats.finalValidPoints} Buy Box data points from Keepa CSV[3]
-                  </div>
-                  <div className="text-slate-600">
-                    Accepts all prices between $0.10 and $2000 from raw data
-                  </div>
-                </>
-              )}
-              {dataStats.buyBoxValidationStats.discardedPoints > 0 && (
-                <div className="text-red-600">
-                  {dataStats.buyBoxValidationStats.discardedPoints} invalid prices filtered out
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              <div className="bg-white dark:bg-slate-800 p-2 rounded">
+                <div className="font-medium text-blue-600">Validation Success</div>
+                <div>
+                  {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps > 0 
+                    ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.totalBuyBoxTimestamps) * 100)
+                    : 0}% of timestamps successfully validated
                 </div>
-              )}
+                <div className="text-green-600">
+                  {dataStats.buyBoxValidationStats.finalValidPoints} seller-backed Buy Box points created
+                </div>
+                <div className="text-red-600">
+                  {dataStats.buyBoxValidationStats.discardedPoints} phantom points discarded
+                </div>
+              </div>
+              <div className="bg-white dark:bg-slate-800 p-2 rounded">
+                <div className="font-medium text-purple-600">Seller Contributions</div>
+                {Object.entries(dataStats.buyBoxValidationStats.sellerBreakdown).slice(0, 3).map(([sellerId, data]) => (
+                  <div key={sellerId} className="text-xs">
+                    {data.sellerName}: {data.pointsContributed} points
+                  </div>
+                ))}
+                {Object.keys(dataStats.buyBoxValidationStats.sellerBreakdown).length > 3 && (
+                  <div className="text-xs text-slate-500">
+                    +{Object.keys(dataStats.buyBoxValidationStats.sellerBreakdown).length - 3} more sellers
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1288,29 +1197,24 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
         
         {/* Enhanced Chart Info */}
         <div className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          Showing {filteredData.length} data points ({granularity} granularity) with {useSellerValidatedBuyBox ? 'seller-validated' : 'CSV[3] direct'} Buy Box data
+          Showing {filteredData.length} data points ({granularity} granularity) with seller-validated Buy Box
           {dataStats?.buyBoxValidationStats && (
             <>
               <br />
               <span className="text-green-600">
-                Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} {useSellerValidatedBuyBox ? 'validated' : 'direct'} data points 
+                Buy Box: {filteredData.filter(d => d.buyBoxPrice !== undefined).length} seller-validated points 
+                (from {Object.keys(dataStats.buyBoxValidationStats.sellerBreakdown).length} different sellers)
               </span>
-              {dataStats.buyBoxValidationStats.discardedPoints > 0 && (
-                <>
-                  <br />
-                  <span className="text-red-600">
-                    Filtered out: {dataStats.buyBoxValidationStats.discardedPoints} invalid price points
-                  </span>
-                </>
-              )}
               <br />
-              <span>Data Rate: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps > 0 
+              <span className="text-red-600">
+                Discarded: {dataStats.buyBoxValidationStats.discardedPoints} phantom Buy Box points eliminated
+              </span>
+              <br />
+              <span>Validation Rate: {dataStats.buyBoxValidationStats.totalBuyBoxTimestamps > 0 
                 ? Math.round((dataStats.buyBoxValidationStats.finalValidPoints / dataStats.buyBoxValidationStats.totalBuyBoxTimestamps) * 100) 
-                : 0}% of timestamps contain valid price data</span>
+                : 0}% of available timestamps successfully validated using seller offerCSV data</span>
             </>
           )}
-          <br />
-          <span className="text-blue-600">Continuous daily X-axis • Gap filling: {fillGaps ? 'Enabled' : 'Disabled'}</span>
           <br />
           Last updated: {product.last_updated ? new Date(product.last_updated).toLocaleString() : 'Unknown'}
         </div>
