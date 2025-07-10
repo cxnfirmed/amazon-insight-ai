@@ -646,9 +646,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     offerCount: false
   });
 
-  // Parse Keepa CSV data with validated Buy Box reconstruction
+  // Parse Keepa CSV data with Buy Box shipping data
   const { chartData, dataStats } = useMemo(() => {
-    console.log('=== PROCESSING CHART DATA WITH VALIDATED BUY BOX ===');
+    console.log('=== PROCESSING CHART DATA WITH BUY BOX SHIPPING ===');
     console.log('Product ASIN:', product.asin);
     console.log('Product CSV structure:', Object.keys(product.csv || {}));
     
@@ -657,18 +657,14 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: null };
     }
 
-    // Parse Buy Box seller ID history and seller offers
-    const buyBoxSellerHistory = parseBuyBoxSellerIdHistory(product);
-    const sellerOffers = parseSellerOffers(product);
-
-    // Parse each CSV series separately - NOTE: Completely ignoring csv[3] for Buy Box
+    // Parse each CSV series separately
     const seriesData: { [key: string]: ParsedSeries } = {};
     let offerCountSeries: ParsedSeries = {};
     
-    // Map Keepa CSV indices to our data fields (NO buyBox csv[3])
+    // Map Keepa CSV indices to our data fields
     const csvMapping = {
       amazon: 0,        // Amazon price
-      salesRank: 4,     // Sales rank (may overlap with seller history)
+      salesRank: 4,     // Sales rank
       offerCount: 5,    // Offer count
       fba: 16,          // FBA price (NEW_FBA)
       fbm: 18,          // FBM price (NEW_FBM)
@@ -691,42 +687,37 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       }
     });
     
-    if (Object.keys(seriesData).length === 0) {
-      console.log('ERROR: No valid series data found after parsing');
-      return { chartData: [], dataStats: null };
-    }
-    
-    // Use Buy Box shipping data from CSV[10] instead of seller validation
+    // Use Buy Box shipping data from CSV[10]
     console.log('=== PARSING BUY BOX SHIPPING DATA FROM CSV[10] ===');
-    const { series: validatedBuyBoxSeries, stats: buyBoxStats } = parseBuyBoxShippingData(product);
+    const { series: buyBoxSeries, stats: buyBoxStats } = parseBuyBoxShippingData(product);
     
-    // Merge all series with validated Buy Box data
-    console.log('=== MERGING SERIES DATA WITH VALIDATED BUY BOX ===');
+    // Merge all series with Buy Box shipping data
+    console.log('=== MERGING SERIES DATA WITH BUY BOX SHIPPING ===');
     const { data: mergedData, stats } = mergeSeriesWithValidatedBuyBox(
       seriesData, 
       offerCountSeries,
-      validatedBuyBoxSeries,
+      buyBoxSeries,
       buyBoxStats
     );
     
     if (mergedData.length === 0) {
       console.log('ERROR: No merged data points created');
-      return { chartData: [], dataStats: stats };
+      return { chartData: [], dataStats: null };
     }
     
     // Sort data chronologically
     let filteredData = mergedData.sort((a, b) => a.timestampMs - b.timestampMs);
     
-    console.log('=== FINAL RESULTS WITH VALIDATED BUY BOX ===');
+    console.log('=== FINAL RESULTS WITH BUY BOX SHIPPING ===');
     console.log('Total processed data points:', filteredData.length);
-    console.log('Validated Buy Box data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
+    console.log('Buy Box shipping data points:', filteredData.filter(d => d.buyBoxPrice !== undefined).length);
     console.log('Date range:', {
       first: filteredData[0]?.timestamp,
       last: filteredData[filteredData.length - 1]?.timestamp
     });
     
     return { chartData: filteredData, dataStats: stats };
-  }, [product.csv, product.asin, product.offers]);
+  }, [product.csv, product.asin]);
 
   const aggregatedData = useMemo(() => {
     return aggregateData(chartData, granularity);
