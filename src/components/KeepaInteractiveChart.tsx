@@ -134,44 +134,55 @@ const keepaTimeToMs = (keepaMinutes: number): number => {
   return KEEPA_EPOCH + (keepaMinutes * 60 * 1000);
 };
 
-// Parse Buy Box seller ID history from CSV (indices 4-7)
+// Parse Buy Box seller ID history - check multiple possible indices 
 const parseBuyBoxSellerIdHistory = (product: AmazonProduct): BuyBoxSellerEntry[] => {
   const history: BuyBoxSellerEntry[] = [];
   
   console.log('=== PARSING BUY BOX SELLER ID HISTORY ===');
+  console.log('Available CSV indices:', Object.keys(product.csv || {}));
   
-  // Check CSV indices 4-7 for Buy Box seller ID history
-  const possibleIndices = [4, 5, 6, 7];
+  // Check multiple indices for Buy Box seller ID history
+  // Common indices: 4 (buyBoxSellerIdHistory), 6, 7, or even 14, 15
+  const possibleIndices = [4, 5, 6, 7, 14, 15];
   let buyBoxSellerCSV: number[] | null = null;
   let usedIndex = -1;
   
   for (const index of possibleIndices) {
     const csvArray = product.csv?.[index];
-    if (csvArray && Array.isArray(csvArray) && csvArray.length >= 2) {
-      console.log(`Checking CSV[${index}]: ${csvArray.length} elements`);
+    console.log(`Checking CSV[${index}]:`, csvArray ? `${csvArray.length} elements` : 'not found');
+    
+    if (csvArray && Array.isArray(csvArray) && csvArray.length >= 4) {
+      // Sample first few entries to check format
+      const sampleData = csvArray.slice(0, 10);
+      console.log(`Sample data from CSV[${index}]:`, sampleData);
       
       // Check if this looks like seller ID data (alternating timestamp/sellerID pairs)
       let isSellerData = true;
-      for (let i = 0; i < Math.min(csvArray.length - 1, 10); i += 2) {
+      for (let i = 0; i < Math.min(csvArray.length - 1, 20); i += 2) {
         const timestamp = csvArray[i];
         const sellerId = csvArray[i + 1];
         if (typeof timestamp !== 'number' || typeof sellerId !== 'number') {
           isSellerData = false;
           break;
         }
+        // Seller IDs should be reasonable numbers (not too large, not -1)
+        if (sellerId < 0 || sellerId > 999999999) {
+          isSellerData = false;
+          break;
+        }
       }
       
-      if (isSellerData) {
+      if (isSellerData && csvArray.length >= 4) {
         buyBoxSellerCSV = csvArray;
         usedIndex = index;
-        console.log(`✅ Found Buy Box seller history in CSV[${index}]: ${Math.floor(csvArray.length / 2)} data points`);
+        console.log(`✅ Found Buy Box seller history in CSV[${index}]: ${Math.floor(csvArray.length / 2)} potential data points`);
         break;
       }
     }
   }
   
   if (!buyBoxSellerCSV) {
-    console.log('❌ No Buy Box seller ID history found in CSV indices 4-7');
+    console.log('❌ No Buy Box seller ID history found in CSV indices:', possibleIndices);
     return history;
   }
   
@@ -180,7 +191,8 @@ const parseBuyBoxSellerIdHistory = (product: AmazonProduct): BuyBoxSellerEntry[]
     const timestampMinutes = buyBoxSellerCSV[i];
     const sellerId = buyBoxSellerCSV[i + 1];
     
-    if (typeof timestampMinutes === 'number' && typeof sellerId === 'number' && sellerId !== -1) {
+    if (typeof timestampMinutes === 'number' && typeof sellerId === 'number' && 
+        sellerId !== -1 && sellerId > 0 && timestampMinutes > 0) {
       history.push({
         timestamp: timestampMinutes,
         sellerId: sellerId.toString()
@@ -191,7 +203,14 @@ const parseBuyBoxSellerIdHistory = (product: AmazonProduct): BuyBoxSellerEntry[]
   // Sort by timestamp
   history.sort((a, b) => a.timestamp - b.timestamp);
   
-  console.log(`Parsed ${history.length} Buy Box seller ID entries from CSV[${usedIndex}]`);
+  console.log(`Parsed ${history.length} valid Buy Box seller ID entries from CSV[${usedIndex}]`);
+  if (history.length > 0) {
+    console.log('Sample entries:', history.slice(0, 5));
+    console.log('Date range:', {
+      first: new Date(keepaTimeToMs(history[0].timestamp)).toISOString(),
+      last: new Date(keepaTimeToMs(history[history.length - 1].timestamp)).toISOString()
+    });
+  }
   return history;
 };
 
@@ -252,7 +271,7 @@ const parseSellerOffers = (product: AmazonProduct): SellerOfferData[] => {
   return sellerData;
 };
 
-// Find seller ID at specific timestamp (with tolerance)
+// Find seller ID at specific timestamp (with tolerance) - this function not needed with new approach
 const findSellerAtTimestamp = (
   timestamp: number,
   buyBoxHistory: BuyBoxSellerEntry[],
@@ -281,12 +300,17 @@ const findSellerPriceAtTimestamp = (
   timestamp: number,
   sellerId: string,
   sellerOffers: SellerOfferData[],
-  toleranceMinutes: number = 30
+  toleranceMinutes: number = 60 // Increased default tolerance
 ): number | null => {
   
   const seller = sellerOffers.find(s => s.sellerId === sellerId);
   if (!seller || !seller.priceHistory) {
     return null;
+  }
+  
+  // Find exact match first
+  if (seller.priceHistory[timestamp]) {
+    return seller.priceHistory[timestamp];
   }
   
   // Find closest price match within tolerance
@@ -307,16 +331,16 @@ const findSellerPriceAtTimestamp = (
 
 // NEW: Reconstruct Buy Box data using seller-backed validation
 const reconstructValidatedBuyBoxData = (
-  seriesData: { [key: string]: ParsedSeries },
   buyBoxSellerHistory: BuyBoxSellerEntry[],
   sellerOffers: SellerOfferData[]
 ): { series: ParsedSeries; stats: BuyBoxValidationStats } => {
   
   console.log('=== RECONSTRUCTING BUY BOX WITH SELLER-BACKED VALIDATION ===');
+  console.log(`Input: ${buyBoxSellerHistory.length} Buy Box history entries, ${sellerOffers.length} seller offers`);
   
   const validatedBuyBox: ParsedSeries = {};
   const stats: BuyBoxValidationStats = {
-    totalBuyBoxTimestamps: 0,
+    totalBuyBoxTimestamps: buyBoxSellerHistory.length,
     sellerIdFound: 0,
     sellerInOffers: 0,
     priceMatches: 0,
@@ -325,67 +349,30 @@ const reconstructValidatedBuyBoxData = (
     sellerBreakdown: {},
     matchingDetails: []
   };
-  
-  // Get all timestamps that have valid price data (FBM, FBA, or Amazon)
-  const allValidTimestamps = new Set<number>();
-  
-  // Add timestamps from FBM (csv[18])
-  if (seriesData.fbm) {
-    Object.keys(seriesData.fbm).forEach(timestamp => {
-      allValidTimestamps.add(Number(timestamp));
-    });
+
+  if (buyBoxSellerHistory.length === 0) {
+    console.log('❌ No Buy Box seller history found - cannot reconstruct Buy Box data');
+    return { series: validatedBuyBox, stats };
+  }
+
+  if (sellerOffers.length === 0) {
+    console.log('❌ No seller offers found - cannot match seller prices');
+    return { series: validatedBuyBox, stats };
   }
   
-  // Add timestamps from FBA (csv[16])  
-  if (seriesData.fba) {
-    Object.keys(seriesData.fba).forEach(timestamp => {
-      allValidTimestamps.add(Number(timestamp));
-    });
-  }
-  
-  // Add timestamps from Amazon (csv[0])
-  if (seriesData.amazon) {
-    Object.keys(seriesData.amazon).forEach(timestamp => {
-      allValidTimestamps.add(Number(timestamp));
-    });
-  }
-  
-  const sortedTimestamps = Array.from(allValidTimestamps).sort((a, b) => a - b);
-  stats.totalBuyBoxTimestamps = sortedTimestamps.length;
-  
-  console.log(`Processing ${stats.totalBuyBoxTimestamps} timestamps with valid price data`);
-  console.log(`Buy Box seller history: ${buyBoxSellerHistory.length} entries`);
-  console.log(`Seller offers: ${sellerOffers.length} sellers`);
-  
-  // Process each timestamp
-  sortedTimestamps.forEach(timestamp => {
+  // Process each Buy Box seller history entry
+  buyBoxSellerHistory.forEach((entry, index) => {
+    const { timestamp, sellerId } = entry;
     const date = new Date(keepaTimeToMs(timestamp)).toISOString();
-    console.log(`\n--- Processing timestamp ${timestamp} (${date}) ---`);
     
-    // Step 1: Find Buy Box seller ID at this timestamp
-    const sellerId = findSellerAtTimestamp(timestamp, buyBoxSellerHistory, 30);
-    
-    if (!sellerId) {
-      console.log(`❌ No seller ID found within ±30 minutes`);
-      stats.discardedPoints++;
-      stats.matchingDetails.push({
-        timestamp,
-        sellerId: '',
-        sellerName: 'Unknown',
-        buyBoxPrice: 0,
-        status: 'discarded',
-        reason: 'No seller ID found'
-      });
-      return;
+    if (index % 50 === 0 || index < 10) { // Log first 10 and every 50th entry
+      console.log(`\n--- Processing entry ${index + 1}/${buyBoxSellerHistory.length}: timestamp ${timestamp} (${date}), seller ${sellerId} ---`);
     }
     
-    stats.sellerIdFound++;
-    console.log(`✅ Found seller ID: ${sellerId}`);
-    
-    // Step 2: Find seller in offers
+    // Step 1: Find seller in offers
     const sellerOffer = sellerOffers.find(s => s.sellerId === sellerId);
     if (!sellerOffer) {
-      console.log(`❌ Seller ${sellerId} not found in product.offers`);
+      if (index < 10) console.log(`❌ Seller ${sellerId} not found in product.offers`);
       stats.discardedPoints++;
       stats.matchingDetails.push({
         timestamp,
@@ -398,14 +385,15 @@ const reconstructValidatedBuyBoxData = (
       return;
     }
     
+    stats.sellerIdFound++;
     stats.sellerInOffers++;
-    console.log(`✅ Found seller in offers: ${sellerOffer.sellerName}`);
+    if (index < 10) console.log(`✅ Found seller in offers: ${sellerOffer.sellerName}`);
     
-    // Step 3: Find seller's price at this timestamp
-    const sellerPrice = findSellerPriceAtTimestamp(timestamp, sellerId, sellerOffers, 30);
+    // Step 2: Find seller's price at this exact timestamp (or very close)
+    const sellerPrice = findSellerPriceAtTimestamp(timestamp, sellerId, sellerOffers, 60); // Increased tolerance to 60 minutes
     
     if (sellerPrice === null || !isValidPrice(sellerPrice)) {
-      console.log(`❌ No valid price found for seller ${sellerId} at timestamp ${timestamp}`);
+      if (index < 10) console.log(`❌ No valid price found for seller ${sellerId} at timestamp ${timestamp}`);
       stats.discardedPoints++;
       stats.matchingDetails.push({
         timestamp,
@@ -419,9 +407,9 @@ const reconstructValidatedBuyBoxData = (
     }
     
     stats.priceMatches++;
-    console.log(`✅ Found valid price: $${sellerPrice.toFixed(2)}`);
+    if (index < 10) console.log(`✅ Found valid price: $${sellerPrice.toFixed(2)}`);
     
-    // Step 4: Add validated Buy Box price
+    // Step 3: Add validated Buy Box price
     validatedBuyBox[timestamp] = sellerPrice;
     stats.finalValidPoints++;
     
@@ -442,16 +430,17 @@ const reconstructValidatedBuyBoxData = (
       status: 'validated'
     });
     
-    console.log(`✅ VALIDATED: ${date} - Seller ${sellerId} (${sellerOffer.sellerName}) - $${sellerPrice.toFixed(2)}`);
+    if (index < 10) console.log(`✅ VALIDATED: ${date} - Seller ${sellerId} (${sellerOffer.sellerName}) - $${sellerPrice.toFixed(2)}`);
   });
   
   console.log('\n=== BUY BOX VALIDATION COMPLETE ===');
-  console.log(`Total Timestamps: ${stats.totalBuyBoxTimestamps}`);
+  console.log(`Total Buy Box History Entries: ${stats.totalBuyBoxTimestamps}`);
   console.log(`Seller ID Found: ${stats.sellerIdFound}`);
   console.log(`Seller In Offers: ${stats.sellerInOffers}`);
   console.log(`Price Matches: ${stats.priceMatches}`);
   console.log(`Final Valid Points: ${stats.finalValidPoints}`);
   console.log(`Discarded Points: ${stats.discardedPoints}`);
+  console.log(`Validation Success Rate: ${stats.totalBuyBoxTimestamps > 0 ? Math.round((stats.finalValidPoints / stats.totalBuyBoxTimestamps) * 100) : 0}%`);
   
   console.log('\n=== SELLER CONTRIBUTION BREAKDOWN ===');
   Object.entries(stats.sellerBreakdown).forEach(([sellerId, data]) => {
@@ -736,7 +725,6 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
     // Reconstruct Buy Box data using validated seller-backed logic
     console.log('=== RECONSTRUCTING BUY BOX WITH VALIDATED SELLER-BACKED LOGIC ===');
     const { series: validatedBuyBoxSeries, stats: buyBoxStats } = reconstructValidatedBuyBoxData(
-      seriesData, 
       buyBoxSellerHistory, 
       sellerOffers
     );
