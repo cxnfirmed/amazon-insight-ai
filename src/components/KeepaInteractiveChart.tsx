@@ -329,18 +329,13 @@ const findSellerPriceAtTimestamp = (
   return bestPrice;
 };
 
-// NEW: Reconstruct Buy Box data using seller-backed validation
-const reconstructValidatedBuyBoxData = (
-  buyBoxSellerHistory: BuyBoxSellerEntry[],
-  sellerOffers: SellerOfferData[]
-): { series: ParsedSeries; stats: BuyBoxValidationStats } => {
+// NEW: Parse Buy Box data from CSV[10] (BUY_BOX_SHIPPING)
+const parseBuyBoxShippingData = (product: AmazonProduct): { series: ParsedSeries; stats: BuyBoxValidationStats } => {
+  console.log('=== PARSING BUY BOX SHIPPING DATA (CSV[10]) ===');
   
-  console.log('=== RECONSTRUCTING BUY BOX WITH SELLER-BACKED VALIDATION ===');
-  console.log(`Input: ${buyBoxSellerHistory.length} Buy Box history entries, ${sellerOffers.length} seller offers`);
-  
-  const validatedBuyBox: ParsedSeries = {};
+  const buyBoxSeries: ParsedSeries = {};
   const stats: BuyBoxValidationStats = {
-    totalBuyBoxTimestamps: buyBoxSellerHistory.length,
+    totalBuyBoxTimestamps: 0,
     sellerIdFound: 0,
     sellerInOffers: 0,
     priceMatches: 0,
@@ -350,103 +345,82 @@ const reconstructValidatedBuyBoxData = (
     matchingDetails: []
   };
 
-  if (buyBoxSellerHistory.length === 0) {
-    console.log('❌ No Buy Box seller history found - cannot reconstruct Buy Box data');
-    return { series: validatedBuyBox, stats };
+  const csvArray = product.csv?.[10]; // BUY_BOX_SHIPPING
+  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
+    console.log('❌ No BUY_BOX_SHIPPING data found in CSV[10]');
+    return { series: buyBoxSeries, stats };
   }
 
-  if (sellerOffers.length === 0) {
-    console.log('❌ No seller offers found - cannot match seller prices');
-    return { series: validatedBuyBox, stats };
+  console.log(`Processing ${Math.floor(csvArray.length / 2)} Buy Box shipping data points from CSV[10]`);
+  stats.totalBuyBoxTimestamps = Math.floor(csvArray.length / 2);
+
+  // Keepa epoch: January 1, 2011 00:00:00 UTC in seconds
+  const KEEPA_EPOCH_SECONDS = 1293840000;
+
+  // Parse alternating [minutesSinceStart, priceInCents] format
+  for (let i = 0; i < csvArray.length - 1; i += 2) {
+    const minutesSinceStart = csvArray[i];
+    const priceInCents = csvArray[i + 1];
+    
+    if (typeof minutesSinceStart !== 'number' || typeof priceInCents !== 'number') {
+      stats.discardedPoints++;
+      continue;
+    }
+    
+    // Skip Keepa's -1 placeholder values
+    if (priceInCents === -1 || minutesSinceStart === -1) {
+      stats.discardedPoints++;
+      continue;
+    }
+    
+    // Convert timestamp: (1293840000 + minutesSinceStart * 60) * 1000
+    const timestampSeconds = KEEPA_EPOCH_SECONDS + (minutesSinceStart * 60);
+    const timestampMs = timestampSeconds * 1000;
+    
+    // Convert to Keepa minutes format for consistency with other data
+    const keepaMinutes = (timestampMs - KEEPA_EPOCH) / (60 * 1000);
+    
+    // Convert price from cents to dollars
+    const priceInDollars = priceInCents / 100;
+    
+    // Validate price
+    if (isValidPrice(priceInDollars)) {
+      buyBoxSeries[keepaMinutes] = priceInDollars;
+      stats.finalValidPoints++;
+      stats.priceMatches++;
+    } else {
+      stats.discardedPoints++;
+    }
   }
   
-  // Process each Buy Box seller history entry
-  buyBoxSellerHistory.forEach((entry, index) => {
-    const { timestamp, sellerId } = entry;
-    const date = new Date(keepaTimeToMs(timestamp)).toISOString();
-    
-    if (index % 50 === 0 || index < 10) { // Log first 10 and every 50th entry
-      console.log(`\n--- Processing entry ${index + 1}/${buyBoxSellerHistory.length}: timestamp ${timestamp} (${date}), seller ${sellerId} ---`);
-    }
-    
-    // Step 1: Find seller in offers
-    const sellerOffer = sellerOffers.find(s => s.sellerId === sellerId);
-    if (!sellerOffer) {
-      if (index < 10) console.log(`❌ Seller ${sellerId} not found in product.offers`);
-      stats.discardedPoints++;
-      stats.matchingDetails.push({
-        timestamp,
-        sellerId,
-        sellerName: 'Unknown',
-        buyBoxPrice: 0,
-        status: 'discarded',
-        reason: 'Seller not in offers'
-      });
-      return;
-    }
-    
-    stats.sellerIdFound++;
-    stats.sellerInOffers++;
-    if (index < 10) console.log(`✅ Found seller in offers: ${sellerOffer.sellerName}`);
-    
-    // Step 2: Find seller's price at this exact timestamp (or very close)
-    const sellerPrice = findSellerPriceAtTimestamp(timestamp, sellerId, sellerOffers, 60); // Increased tolerance to 60 minutes
-    
-    if (sellerPrice === null || !isValidPrice(sellerPrice)) {
-      if (index < 10) console.log(`❌ No valid price found for seller ${sellerId} at timestamp ${timestamp}`);
-      stats.discardedPoints++;
-      stats.matchingDetails.push({
-        timestamp,
-        sellerId,
-        sellerName: sellerOffer.sellerName,
-        buyBoxPrice: sellerPrice || 0,
-        status: 'discarded',
-        reason: 'No valid price found'
-      });
-      return;
-    }
-    
-    stats.priceMatches++;
-    if (index < 10) console.log(`✅ Found valid price: $${sellerPrice.toFixed(2)}`);
-    
-    // Step 3: Add validated Buy Box price
-    validatedBuyBox[timestamp] = sellerPrice;
-    stats.finalValidPoints++;
-    
-    // Track seller contribution
-    if (!stats.sellerBreakdown[sellerId]) {
-      stats.sellerBreakdown[sellerId] = {
-        sellerName: sellerOffer.sellerName,
-        pointsContributed: 0
-      };
-    }
-    stats.sellerBreakdown[sellerId].pointsContributed++;
-    
-    stats.matchingDetails.push({
-      timestamp,
-      sellerId,
-      sellerName: sellerOffer.sellerName,
-      buyBoxPrice: sellerPrice,
-      status: 'validated'
-    });
-    
-    if (index < 10) console.log(`✅ VALIDATED: ${date} - Seller ${sellerId} (${sellerOffer.sellerName}) - $${sellerPrice.toFixed(2)}`);
-  });
+  console.log(`✅ Parsed ${stats.finalValidPoints} valid Buy Box shipping data points`);
+  console.log(`Success Rate: ${stats.totalBuyBoxTimestamps > 0 ? Math.round((stats.finalValidPoints / stats.totalBuyBoxTimestamps) * 100) : 0}%`);
   
-  console.log('\n=== BUY BOX VALIDATION COMPLETE ===');
-  console.log(`Total Buy Box History Entries: ${stats.totalBuyBoxTimestamps}`);
-  console.log(`Seller ID Found: ${stats.sellerIdFound}`);
-  console.log(`Seller In Offers: ${stats.sellerInOffers}`);
-  console.log(`Price Matches: ${stats.priceMatches}`);
-  console.log(`Final Valid Points: ${stats.finalValidPoints}`);
-  console.log(`Discarded Points: ${stats.discardedPoints}`);
-  console.log(`Validation Success Rate: ${stats.totalBuyBoxTimestamps > 0 ? Math.round((stats.finalValidPoints / stats.totalBuyBoxTimestamps) * 100) : 0}%`);
+  return { series: buyBoxSeries, stats };
+};
+
+// LEGACY: Reconstruct Buy Box data using seller-backed validation (disabled for now)
+const reconstructValidatedBuyBoxData = (
+  buyBoxSellerHistory: BuyBoxSellerEntry[],
+  sellerOffers: SellerOfferData[]
+): { series: ParsedSeries; stats: BuyBoxValidationStats } => {
   
-  console.log('\n=== SELLER CONTRIBUTION BREAKDOWN ===');
-  Object.entries(stats.sellerBreakdown).forEach(([sellerId, data]) => {
-    console.log(`Seller ${sellerId} (${data.sellerName}): ${data.pointsContributed} points`);
-  });
+  console.log('=== SELLER-BACKED VALIDATION (CURRENTLY DISABLED) ===');
   
+  const validatedBuyBox: ParsedSeries = {};
+  const stats: BuyBoxValidationStats = {
+    totalBuyBoxTimestamps: 0,
+    sellerIdFound: 0,
+    sellerInOffers: 0,
+    priceMatches: 0,
+    finalValidPoints: 0,
+    discardedPoints: 0,
+    sellerBreakdown: {},
+    matchingDetails: []
+  };
+  
+  // Currently disabled - return empty results
+  console.log('Seller validation logic preserved but disabled in favor of CSV[10] data');
   return { series: validatedBuyBox, stats };
 };
 
@@ -722,12 +696,9 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return { chartData: [], dataStats: null };
     }
     
-    // Reconstruct Buy Box data using validated seller-backed logic
-    console.log('=== RECONSTRUCTING BUY BOX WITH VALIDATED SELLER-BACKED LOGIC ===');
-    const { series: validatedBuyBoxSeries, stats: buyBoxStats } = reconstructValidatedBuyBoxData(
-      buyBoxSellerHistory, 
-      sellerOffers
-    );
+    // Use Buy Box shipping data from CSV[10] instead of seller validation
+    console.log('=== PARSING BUY BOX SHIPPING DATA FROM CSV[10] ===');
+    const { series: validatedBuyBoxSeries, stats: buyBoxStats } = parseBuyBoxShippingData(product);
     
     // Merge all series with validated Buy Box data
     console.log('=== MERGING SERIES DATA WITH VALIDATED BUY BOX ===');
@@ -875,7 +846,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
             <CardTitle className="flex items-center gap-2">
               {title}
               <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                Seller-Validated Data ({filteredData.length} points)
+                Buy Box Shipping Data ({filteredData.length} points)
               </Badge>
               {getDataQualityBadge()}
             </CardTitle>
@@ -1031,11 +1002,11 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                     checked={lineVisibility.buyBoxPrice}
                     onCheckedChange={() => toggleLineVisibility('buyBoxPrice')}
                   />
-                  <Label htmlFor="buybox-price" className="text-xs">
-                    <span className="inline-block w-3 h-3 rounded-full mr-1" 
-                          style={{ backgroundColor: COLOR_SCHEME.buyBoxPrice }}></span>
-                    Buy Box (Seller-Validated)
-                  </Label>
+                   <Label htmlFor="buybox-price" className="text-xs">
+                     <span className="inline-block w-3 h-3 rounded-full mr-1" 
+                           style={{ backgroundColor: COLOR_SCHEME.buyBoxPrice }}></span>
+                     Buy Box (Shipping Included)
+                   </Label>
                 </div>
               </>
             )}
@@ -1168,7 +1139,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
                       dataKey="buyBoxPrice" 
                       stroke={COLOR_SCHEME.buyBoxPrice}
                       strokeWidth={3}
-                      name="Buy Box Price (Seller-Validated)"
+                      name="Buy Box (Shipping Included)"
                       dot={false}
                       connectNulls={fillGaps}
                     />
