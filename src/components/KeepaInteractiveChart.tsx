@@ -728,69 +728,19 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return [];
     }
     
-    let baseData = aggregatedData;
-    let startTime: number;
-    let endTime: number;
-    
     if (timeRange === 'all') {
-      startTime = Math.min(...aggregatedData.map(d => d.timestampMs));
-      endTime = Math.max(...aggregatedData.map(d => d.timestampMs));
-    } else {
-      const range = TIME_RANGES.find(r => r.value === timeRange);
-      if (!range || !range.days) {
-        return aggregatedData;
-      }
-      
-      endTime = Date.now();
-      startTime = endTime - (range.days * 24 * 60 * 60 * 1000);
-      baseData = aggregatedData.filter(point => point.timestampMs >= startTime);
+      return aggregatedData;
     }
     
-    // Create continuous daily timeline
-    const continuousData: ChartDataPoint[] = [];
-    const dataMap = new Map<string, ChartDataPoint>();
-    
-    // Map existing data by date
-    baseData.forEach(point => {
-      const dateKey = new Date(point.timestampMs).toDateString();
-      dataMap.set(dateKey, point);
-    });
-    
-    // Generate daily intervals from start to end
-    const currentDate = new Date(startTime);
-    currentDate.setHours(0, 0, 0, 0); // Start at midnight
-    const endDate = new Date(endTime);
-    endDate.setHours(23, 59, 59, 999); // End at end of day
-    
-    while (currentDate <= endDate) {
-      const dateKey = currentDate.toDateString();
-      const timestampMs = currentDate.getTime();
-      
-      if (dataMap.has(dateKey)) {
-        // Use existing data point
-        continuousData.push(dataMap.get(dateKey)!);
-      } else {
-        // Create empty data point for this date
-        continuousData.push({
-          timestamp: currentDate.toISOString(),
-          timestampMs,
-          formattedDate: currentDate.toLocaleDateString(),
-          amazonPrice: undefined,
-          fbaPrice: undefined,
-          fbmPrice: undefined,
-          buyBoxPrice: undefined,
-          salesRank: undefined,
-          offerCount: undefined,
-          rating: undefined,
-          reviewCount: undefined
-        });
-      }
-      
-      // Move to next day
-      currentDate.setDate(currentDate.getDate() + 1);
+    const range = TIME_RANGES.find(r => r.value === timeRange);
+    if (!range || !range.days) {
+      return aggregatedData;
     }
     
-    return continuousData;
+    const cutoffTime = Date.now() - (range.days * 24 * 60 * 60 * 1000);
+    const filtered = aggregatedData.filter(point => point.timestampMs >= cutoffTime);
+    
+    return filtered;
   }, [aggregatedData, timeRange]);
 
   const toggleLineVisibility = (line: keyof LineVisibility) => {
