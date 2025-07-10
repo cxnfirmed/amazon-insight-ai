@@ -755,7 +755,7 @@ export const KeepaInteractiveChart: React.FC<KeepaInteractiveChartProps> = ({
       return (
         <div className="bg-white dark:bg-slate-800 p-3 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg">
           <p className="font-semibold text-slate-900 dark:text-white">
-            {new Date(label).toLocaleDateString()}
+            {new Date(label).toLocaleDateString()} {new Date(label).toLocaleTimeString()}
           </p>
           {payload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color }} className="text-sm">
